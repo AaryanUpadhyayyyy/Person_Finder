@@ -161,6 +161,7 @@ def _normalise_match(raw: Dict) -> Dict[str, str]:
         "title": raw.get("title", ""),
         "source": raw.get("source", ""),
         "thumbnail": raw.get("thumbnail", ""),
+        "original_url": raw.get("source_image", raw.get("original_image", "")),
     }
 
 
@@ -173,3 +174,110 @@ def _is_social(url: str) -> bool:
         return any(host == d or host.endswith("." + d) for d in SOCIAL_DOMAINS)
     except Exception:
         return False
+
+def search_yandex_online(image_url: str) -> List[Dict[str, str]]:
+    """Deep Search Fallback using Yandex Reverse Image Search."""
+    cfg = get_config()
+    params = {
+        "engine": "yandex_images",
+        "url": image_url,
+        "api_key": cfg["SERPAPI_API_KEY"],
+        "no_cache": "true",
+    }
+    
+    try:
+        resp = requests.get(_API_URL, params=params, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        raw_matches = data.get("image_results", [])
+        visual = []
+        for m in raw_matches:
+            if not m.get("link"):
+                continue
+            thumb = m.get("thumbnail", {}).get("link", "")
+            if not thumb:
+                thumb = m.get("thumbnail", "") if isinstance(m.get("thumbnail"), str) else ""
+            
+            orig = m.get("original_image", {}).get("link", "")
+            
+            visual.append({
+                "link": m.get("link", ""),
+                "title": m.get("title", ""),
+                "source": m.get("source", ""),
+                "thumbnail": thumb,
+                "original_url": orig,
+            })
+        return visual
+    except Exception as e:
+        print(f"Yandex fallback failed: {e}")
+        return []
+
+
+def search_google_reverse_image(image_url: str) -> List[Dict[str, str]]:
+    """Google Reverse Image Search (older, more comprehensive than Lens)."""
+    cfg = get_config()
+    params = {
+        "engine": "google_reverse_image",
+        "image_url": image_url,
+        "api_key": cfg["SERPAPI_API_KEY"],
+        "no_cache": "true",
+    }
+    
+    try:
+        resp = requests.get(_API_URL, params=params, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        raw_matches = data.get("image_results", [])
+        visual = []
+        for m in raw_matches:
+            if not m.get("link"):
+                continue
+            visual.append({
+                "link": m.get("link", ""),
+                "title": m.get("title", ""),
+                "source": m.get("source", ""),
+                "thumbnail": m.get("thumbnail", {}).get("link", m.get("thumbnail", "")) if isinstance(m.get("thumbnail"), dict) else m.get("thumbnail", ""),
+                "original_url": m.get("original", {}).get("link", "") if isinstance(m.get("original"), dict) else "",
+            })
+        return visual
+    except Exception as e:
+        print(f"Google Reverse Image failed: {e}")
+        return []
+
+
+def search_all_engines(image_url: str) -> List[Dict[str, str]]:
+    """Fire Google Lens, Yandex, and Google Reverse Image in PARALLEL.
+    
+    Merges and deduplicates all results by URL.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    all_results: List[Dict[str, str]] = []
+    
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(search_yandex_online, image_url): "yandex",
+            executor.submit(search_google_reverse_image, image_url): "google_reverse",
+        }
+        
+        for future in as_completed(futures):
+            engine = futures[future]
+            try:
+                results = future.result()
+                print(f"  [SEARCH] {engine}: {len(results)} candidates")
+                all_results.extend(results)
+            except Exception as e:
+                print(f"  [SEARCH] {engine} failed: {e}")
+    
+    # Deduplicate by link
+    seen = set()
+    unique = []
+    for r in all_results:
+        if r["link"] not in seen:
+            seen.add(r["link"])
+            unique.append(r)
+    
+    print(f"  [SEARCH] All engines combined: {len(unique)} unique candidates")
+    return unique

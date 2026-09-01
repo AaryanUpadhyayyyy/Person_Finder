@@ -2,7 +2,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -26,11 +26,17 @@ app.add_middleware(
 )
 
 @app.post("/api/scan")
-async def scan_face(file: UploadFile = File(...)):
+async def scan_face(file: UploadFile = File(...), serpapi_key: str = Form(None)):
     suffix = Path(file.filename).suffix if file.filename else ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
+        
+    if serpapi_key:
+        get_config()["SERPAPI_API_KEY"] = serpapi_key
+    else:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Missing SerpApi key. Please provide it in the UI.")
 
     try:
         # Stage 1: Face
@@ -43,6 +49,39 @@ async def scan_face(file: UploadFile = File(...)):
         # Stage 3: Verification
         verify_result = stage_verify(face_result["embedding"], tmp_path, search_result)
         
+        # --- DEEP SEARCH FALLBACK (Triple Engine) ---
+        best_match = verify_result.get("best_match")
+        if not best_match or not best_match.get("verified", False):
+            print("No verified match from Google Lens. Triggering Triple Engine Deep Search...")
+            from search.web_search import search_all_engines
+            from search.verify_match import verify_candidates
+            
+            # Collect existing links to avoid re-verifying duplicates
+            existing_links = {c.get("link", "") for c in verify_result.get("all_scored", [])}
+            existing_links.update(c.get("link", "") for c in verify_result.get("skipped", []))
+            
+            deep_candidates = search_all_engines(search_result["image_url"])
+            # Filter out already-processed candidates and LIMIT to top 30 to save time
+            new_candidates = [c for c in deep_candidates if c["link"] not in existing_links][:30]
+            
+            if new_candidates:
+                print(f"Deep Search: {len(new_candidates)} NEW candidates to verify.")
+                deep_verify = verify_candidates(face_result["embedding"], tmp_path, new_candidates)
+                
+                # Merge newly scored candidates
+                verify_result["all_scored"].extend(deep_verify.get("all_scored", []))
+                verify_result["skipped"].extend(deep_verify.get("skipped", []))
+                
+                # Re-sort all_scored by similarity
+                verify_result["all_scored"].sort(key=lambda x: x.get("similarity", 0), reverse=True)
+                
+                # Re-evaluate best_match
+                if verify_result["all_scored"]:
+                    verify_result["best_match"] = verify_result["all_scored"][0]
+                    if verify_result["best_match"].get("verified", False):
+                        search_result["visual_matches"].append(verify_result["best_match"])
+        # -------------------------------------------
+
         # Stage 4: Blockchain (try, skip if hardhat offline)
         try:
             blockchain_result = stage_blockchain(search_result, verify_result)

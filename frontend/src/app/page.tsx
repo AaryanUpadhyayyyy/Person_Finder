@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from 'react';
-import { ScanFace, Upload, Search, ShieldCheck, CheckCircle, XCircle, ExternalLink, User, Globe, Hash, Layers } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { ScanFace, Upload, Search, ShieldCheck, CheckCircle, XCircle, ExternalLink, User, Globe, Hash, Layers, Printer, Key } from 'lucide-react';
 
 type AppState = 'idle' | 'processing' | 'verified' | 'error';
 
@@ -42,7 +42,13 @@ export default function Home() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [results, setResults] = useState<ScanResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [serpApiKey, setSerpApiKey] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const savedKey = localStorage.getItem('serpApiKey');
+    if (savedKey) setSerpApiKey(savedKey);
+  }, []);
 
   const bgImage = appState === 'verified' && results?.passed
     ? "url('/bg2.png')" : "url('/Talaash_bg.png')";
@@ -58,23 +64,39 @@ export default function Home() {
   const handleStartTalaash = async () => {
     if (!selectedFile) return;
     setAppState('processing');
-    setPipelineStep(1);
+    setPipelineStep(1); // Detecting & Encoding
+    
     const formData = new FormData();
     formData.append("file", selectedFile);
+    if (serpApiKey.trim()) {
+      formData.append("serpapi_key", serpApiKey.trim());
+    }
+    
+    // Realistic fake progress for the 5 steps while we wait for the long API call
+    const timers = [
+      setTimeout(() => setPipelineStep(2), 2000),   // Google Lens Search
+      setTimeout(() => setPipelineStep(3), 5000),   // Verifying Candidates
+      setTimeout(() => setPipelineStep(4), 8000),   // Deep Search (Triple Engine)
+      setTimeout(() => setPipelineStep(5), 20000),  // Blockchain Record
+    ];
+
     try {
-      const stepTimer = setTimeout(() => setPipelineStep(2), 1500);
-      const res = await fetch("http://localhost:8000/api/scan", {
+      // Use deployed backend URL if available, otherwise local
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${apiUrl}/api/scan`, {
         method: "POST",
         body: formData,
       });
-      clearTimeout(stepTimer);
+      
+      timers.forEach(clearTimeout);
+      
       if (!res.ok) throw new Error("Pipeline failed or server is down");
-      setPipelineStep(3);
+      
       const data: ScanResult = await res.json();
-      setPipelineStep(4);
       setResults(data);
       setAppState('verified');
     } catch (err: any) {
+      timers.forEach(clearTimeout);
       setErrorMsg(err.message);
       setAppState('error');
     }
@@ -117,6 +139,22 @@ export default function Home() {
     return (
       <main className="min-h-screen w-full relative overflow-hidden flex flex-col items-center bg-[#FDF8EE] pb-8 px-4">
         <CanvaElements />
+        
+        {/* Custom API Key Input */}
+        <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-white/80 backdrop-blur neo-border px-3 py-1.5 rounded-xl shadow-sm">
+          <Key size={16} className="text-gray-500" />
+          <input 
+            type="password"
+            placeholder="Enter your SerpApi Key"
+            className="bg-transparent border-none outline-none text-sm w-56 placeholder-gray-500 text-black font-bold"
+            value={serpApiKey}
+            onChange={(e) => {
+              setSerpApiKey(e.target.value);
+              localStorage.setItem('serpApiKey', e.target.value);
+            }}
+          />
+        </div>
+
         <Header />
         
         <div className="relative z-10 w-full max-w-md bg-white neo-border neo-shadow p-6 rounded-2xl flex flex-col items-center text-center mt-4">
@@ -143,14 +181,14 @@ export default function Home() {
 
           <button
             onClick={handleStartTalaash}
-            disabled={!selectedFile}
-            className={`w-full font-black text-xl py-4 rounded-xl neo-border transition-all cursor-pointer ${
-              selectedFile
-                ? "bg-talaash-pink text-white neo-shadow hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-none"
+            disabled={!selectedFile || !serpApiKey.trim()}
+            className={`w-full font-black text-xl py-4 rounded-xl neo-border transition-all ${
+              selectedFile && serpApiKey.trim()
+                ? "bg-talaash-pink text-white neo-shadow hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-none cursor-pointer"
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
             }`}
           >
-            START TALAASH
+            {(!serpApiKey.trim()) ? "ENTER API KEY FIRST" : "START TALAASH"}
           </button>
         </div>
       </main>
@@ -159,31 +197,75 @@ export default function Home() {
 
   // ─── PROCESSING: Pipeline Steps ───
   if (appState === 'processing') {
+    const steps = [
+      { icon: <ScanFace size={20} strokeWidth={3} />, label: "Detecting & Encoding Face", sub: "InsightFace AI analyzing landmarks..." },
+      { icon: <Search size={20} strokeWidth={3} />, label: "Google Lens Search", sub: "Dual search: original + cropped face..." },
+      { icon: <ScanFace size={20} strokeWidth={3} />, label: "Verifying Candidates", sub: "Multi-face scoring with HD fallback..." },
+      { icon: <Globe size={20} strokeWidth={3} />, label: "Deep Search (Yandex + Bing)", sub: "Triple engine parallel scan..." },
+      { icon: <ShieldCheck size={20} strokeWidth={3} />, label: "Blockchain Record", sub: "Hashing & uploading proof on-chain..." },
+    ];
+
     return (
       <main className="min-h-screen w-full relative overflow-hidden flex flex-col items-center bg-[#FDF8EE] pb-8 px-4">
         <CanvaElements />
         <Header />
         
-        <div className="relative z-10 w-full max-w-md bg-white neo-border neo-shadow p-8 rounded-2xl mt-4">
-          <h2 className="font-black text-xl mb-6 border-b-[3px] border-black pb-3 text-center">Verification Pipeline</h2>
-          <div className="space-y-5 font-bold text-base pl-4">
-            <div className={`flex items-center gap-3 ${pipelineStep >= 1 ? 'text-talaash-green' : 'text-gray-300'}`}>
-              {pipelineStep === 1 ? <ScanFace size={24} strokeWidth={3} className="animate-pulse text-talaash-yellow" /> : <CheckCircle size={24} strokeWidth={3} />}
-              <span className={pipelineStep >= 1 ? 'text-black' : 'text-gray-400'}>1. Encoding Face</span>
+        <div className="relative z-10 w-full max-w-md mt-4 flex flex-col gap-4">
+          
+          {/* Image Preview Card */}
+          {previewUrl && (
+            <div className="bg-white neo-border neo-shadow rounded-2xl p-4 flex items-center gap-4">
+              <div className="w-20 h-20 rounded-xl neo-border overflow-hidden flex-shrink-0">
+                <img src={previewUrl} alt="Scanning" className="w-full h-full object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-black text-sm text-gray-800 truncate">{selectedFile?.name}</p>
+                <p className="text-xs text-gray-500 font-bold mt-1">Scanning in progress...</p>
+                <div className="mt-2 h-2 bg-gray-200 rounded-full neo-border overflow-hidden">
+                  <div className="h-full bg-talaash-pink rounded-full animate-pulse" style={{ width: `${Math.min(95, pipelineStep * 25)}%`, transition: 'width 1s ease' }}></div>
+                </div>
+              </div>
             </div>
-            <div className={`flex items-center gap-3 ${pipelineStep >= 2 ? 'text-talaash-green' : 'text-gray-300'}`}>
-              {pipelineStep === 2 ? <Search size={24} strokeWidth={3} className="animate-spin text-talaash-yellow" /> : <CheckCircle size={24} strokeWidth={3} />}
-              <span className={pipelineStep >= 2 ? 'text-black' : 'text-gray-400'}>2. Searching Web</span>
-            </div>
-            <div className={`flex items-center gap-3 ${pipelineStep >= 3 ? 'text-talaash-green' : 'text-gray-300'}`}>
-              {pipelineStep === 3 ? <ScanFace size={24} strokeWidth={3} className="animate-pulse text-talaash-yellow" /> : <CheckCircle size={24} strokeWidth={3} />}
-              <span className={pipelineStep >= 3 ? 'text-black' : 'text-gray-400'}>3. Verifying Match</span>
-            </div>
-            <div className={`flex items-center gap-3 ${pipelineStep >= 4 ? 'text-talaash-green' : 'text-gray-300'}`}>
-              <ShieldCheck size={24} strokeWidth={3} />
-              <span className="text-gray-400">4. Blockchain Upload</span>
+          )}
+
+          {/* Pipeline Steps Card */}
+          <div className="bg-white neo-border neo-shadow p-5 rounded-2xl">
+            <h2 className="font-black text-base mb-4 border-b-[3px] border-black pb-2 text-center uppercase tracking-wide">Verification Pipeline</h2>
+            <div className="space-y-3">
+              {steps.map((step, i) => {
+                const stepNum = i + 1;
+                const isActive = pipelineStep === stepNum;
+                const isDone = pipelineStep > stepNum;
+                const isPending = pipelineStep < stepNum;
+
+                return (
+                  <div key={i} className={`flex items-start gap-3 p-2.5 rounded-xl transition-all duration-300 ${isActive ? 'bg-talaash-yellow/15 neo-border' : isDone ? 'opacity-60' : 'opacity-30'}`}>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 neo-border ${isDone ? 'bg-talaash-green text-white' : isActive ? 'bg-talaash-yellow text-black animate-pulse' : 'bg-gray-100 text-gray-400'}`}>
+                      {isDone ? <CheckCircle size={16} strokeWidth={3} /> : step.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-black text-sm ${isPending ? 'text-gray-400' : 'text-black'}`}>{step.label}</p>
+                      {isActive && <p className="text-[11px] text-gray-500 font-bold mt-0.5 animate-pulse">{step.sub}</p>}
+                    </div>
+                    {isDone && <span className="text-[10px] font-black text-talaash-green uppercase mt-1">Done</span>}
+                    {isActive && (
+                      <div className="flex gap-0.5 mt-2">
+                        <div className="w-1.5 h-1.5 bg-talaash-pink rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-1.5 h-1.5 bg-talaash-pink rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-1.5 h-1.5 bg-talaash-pink rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
+
+          {/* Tip */}
+          <div className="text-center px-4">
+            <p className="text-xs font-bold text-gray-400">💡 Triple Engine Deep Search scans Google, Yandex & Bing simultaneously</p>
+          </div>
+
         </div>
       </main>
     );
@@ -209,11 +291,15 @@ export default function Home() {
   // ─── VERIFIED: Professional Dashboard Results ───
   const bestCandidateThumb = results?.candidates?.find(c => c.verified)?.thumbnail || results?.candidates?.[0]?.thumbnail;
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
-    <main className="min-h-screen w-full bg-[#FDF8EE] overflow-y-auto pb-16 font-sans text-black">
+    <main className="min-h-screen w-full bg-[#FDF8EE] overflow-y-auto pb-16 font-sans text-black print:bg-white print:pb-0">
       
       {/* Navbar */}
-      <nav className="w-full border-b-[3px] border-black bg-white mb-6 sticky top-0 z-50">
+      <nav className="w-full border-b-[3px] border-black bg-white mb-6 sticky top-0 z-50 print:hidden">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <h1 
             className="text-3xl leading-none text-black drop-shadow-sm mt-1"
@@ -221,12 +307,20 @@ export default function Home() {
           >
             Talaash
           </h1>
-          <button
-            onClick={handleReset}
-            className="bg-black text-white font-black text-xs px-5 py-2.5 rounded-lg neo-border hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-none transition-all cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex items-center gap-2"
-          >
-            <ScanFace size={16} /> NEW SCAN
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={handlePrint}
+              className="bg-white text-black font-black text-xs px-5 py-2.5 rounded-lg neo-border hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-none transition-all cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex items-center gap-2"
+            >
+              <Printer size={16} /> SAVE REPORT
+            </button>
+            <button
+              onClick={handleReset}
+              className="bg-black text-white font-black text-xs px-5 py-2.5 rounded-lg neo-border hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-none transition-all cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex items-center gap-2"
+            >
+              <ScanFace size={16} /> NEW SCAN
+            </button>
+          </div>
         </div>
       </nav>
 

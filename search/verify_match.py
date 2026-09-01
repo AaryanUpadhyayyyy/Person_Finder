@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 import cv2
 import numpy as np
 
-from face.face_scan import get_face_embedding
+from face.face_scan import get_face_embedding, get_all_face_embeddings
 from utils.config import get_config, get_output_dir
 from utils.image_utils import create_comparison_image, download_image
 
@@ -65,8 +65,35 @@ def verify_candidates(
             return {"status": "skipped", "cand": cand}
         try:
             thumb_img = download_image(thumb_url)
-            cand_emb, _ = get_face_embedding(thumb_img)
-            sim = float(np.dot(original_embedding, cand_emb))
+            
+            # --- MULTI-FACE SCORING (OPT-4) ---
+            # Compare against ALL faces in the candidate image,
+            # not just the largest. The target person may be small
+            # in a group photo.
+            all_embs = get_all_face_embeddings(thumb_img)
+            if not all_embs:
+                return {"status": "skipped", "cand": cand}
+            
+            sim = max(float(np.dot(original_embedding, e)) for e in all_embs)
+            # -----------------------------------
+            
+            # --- HYBRID HIGH-RES FALLBACK (OPT-7) ---
+            # If the thumbnail score is borderline, try the original HD image
+            if 0.25 <= sim < threshold:
+                orig_url = cand.get("original_url", "")
+                if orig_url:
+                    try:
+                        orig_img = download_image(orig_url)
+                        hires_embs = get_all_face_embeddings(orig_img)
+                        if hires_embs:
+                            sim_high = max(float(np.dot(original_embedding, e)) for e in hires_embs)
+                            if sim_high > sim:
+                                sim = sim_high
+                                thumb_img = orig_img
+                    except Exception:
+                        pass  # HD download/detect failed, keep thumbnail score
+            # ----------------------------------------
+            
             return {
                 "status": "scored",
                 "cand": {

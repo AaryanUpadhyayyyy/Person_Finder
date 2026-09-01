@@ -87,6 +87,21 @@ def get_face_embedding(
     return emb, meta
 
 
+def get_all_face_embeddings(image_input) -> List[np.ndarray]:
+    """Return L2-normalised embeddings for ALL detected faces.
+
+    Used for multi-face candidate scoring — when a candidate image
+    contains a group photo, we compare against every face and take
+    the best match instead of just the largest face.
+
+    Returns an empty list if no faces are detected (no exception).
+    """
+    img = _load_image(image_input)
+    app = _get_app()
+    faces = app.get(img)
+    return [f.normed_embedding for f in faces if f.normed_embedding is not None]
+
+
 def save_annotated_image(
     image_input,
     output_path: str,
@@ -149,15 +164,59 @@ def crop_and_save_face(
 # ── internal helpers ───────────────────────────────────────────────────
 
 def _load_image(src) -> np.ndarray:
-    """Accept a path *or* an already-loaded ndarray."""
+    """Accept a path *or* an already-loaded ndarray.
+    
+    Applies preprocessing:
+      - EXIF auto-orient (fixes rotated phone photos)
+      - CLAHE histogram equalization (improves low-light images)
+      - Upscale tiny images to at least 640px on shortest side
+    """
     if isinstance(src, np.ndarray):
         return src
     path = str(src)
     if not Path(path).is_file():
         raise FileNotFoundError(f"Image not found: {path}")
-    img = cv2.imread(path)
+    
+    # --- EXIF auto-orient ---
+    try:
+        from PIL import Image
+        from PIL.ExifTags import Base as ExifBase
+        pil_img = Image.open(path)
+        # ImageOps.exif_transpose handles all EXIF rotation cases
+        from PIL import ImageOps
+        pil_img = ImageOps.exif_transpose(pil_img)
+        # Convert PIL -> OpenCV BGR
+        import numpy as _np
+        img = _np.array(pil_img)
+        if len(img.shape) == 3 and img.shape[2] == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        elif len(img.shape) == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+    except Exception:
+        # Fallback to plain OpenCV if PIL fails
+        img = cv2.imread(path)
+    
     if img is None:
         raise ValueError(f"OpenCV could not decode: {path}")
+    
+    # --- Upscale tiny images ---
+    h, w = img.shape[:2]
+    min_dim = min(h, w)
+    if min_dim < 640:
+        scale = 640 / min_dim
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), 
+                         interpolation=cv2.INTER_CUBIC)
+    
+    # --- CLAHE enhancement (adaptive histogram equalization) ---
+    try:
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l = clahe.apply(l)
+        img = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+    except Exception:
+        pass  # Non-critical; continue with unenhanced image
+    
     return img
 
 

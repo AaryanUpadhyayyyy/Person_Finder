@@ -173,9 +173,13 @@ def stage_verify(
         return {"best_match": None, "all_scored": [], "skipped": [],
                 "comparison_image": None}
 
-    # prefer social-media, fall back to any visual
-    candidates = (search_result["social_media_matches"]
-                  or search_result["visual_matches"])
+    # verify ALL candidates — social + visual merged, deduplicated by link
+    seen_links = set()
+    candidates = []
+    for c in search_result["social_media_matches"] + search_result["visual_matches"]:
+        if c["link"] not in seen_links:
+            seen_links.add(c["link"])
+            candidates.append(c)
 
     result = verify_candidates(embedding, image_path, candidates)
     best = result["best_match"]

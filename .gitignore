@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+output/
+*.onnx
+node_modules/
+build/

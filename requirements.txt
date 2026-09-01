@@ -1,0 +1,8 @@
+insightface>=0.7
+onnxruntime
+opencv-python
+numpy
+requests
+web3>=6.0
+python-dotenv
+py-solc-x

@@ -107,16 +107,43 @@ def stage_face(image_path: str) -> dict:
     return {"embedding": emb, "meta": meta, "cropped_path": cropped}
 
 
-def stage_search(image_path: str, *, force_fresh: bool = False) -> dict:
-    """Stage 2: reverse-image search via Google Lens."""
+def stage_search(original_path: str, cropped_path: str, *, force_fresh: bool = False) -> dict:
+    """Stage 2: reverse-image search via Google Lens (Dual Search).
+    Searches BOTH the full image and the isolated face, then merges results.
+    """
     from search.web_search import search_face_online
 
-    result = search_face_online(image_path, force_fresh=force_fresh)
-    tier = result["search_tier"]
+    res_orig = search_face_online(original_path, force_fresh=force_fresh)
+    res_crop = search_face_online(cropped_path, force_fresh=force_fresh)
+
+    # Merge and deduplicate candidates by their link
+    seen = set()
+    merged_social = []
+    for m in res_orig["social_media_matches"] + res_crop["social_media_matches"]:
+        if m["link"] not in seen:
+            seen.add(m["link"])
+            merged_social.append(m)
+            
+    merged_visual = []
+    for m in res_orig["visual_matches"] + res_crop["visual_matches"]:
+        if m["link"] not in seen:
+            seen.add(m["link"])
+            merged_visual.append(m)
+
+    tier = "social_media" if merged_social else ("visual_match" if merged_visual else "no_match")
+    from_cache = res_orig.get("from_cache", False) and res_crop.get("from_cache", False)
+
+    result = {
+        "search_tier": tier,
+        "social_media_matches": merged_social,
+        "visual_matches": merged_visual,
+        "image_url": res_orig["image_url"],  # Keep original url for self-hash
+        "from_cache": from_cache
+    }
 
     social = result["social_media_matches"]
     visual = result["visual_matches"]
-    _ok(f"Google Lens returned {len(visual)} visual match(es)")
+    _ok(f"Dual search merged: {len(visual) + len(social)} unique match(es)")
 
     if social:
         _ok(f"Social-media matches: {len(social)}")
@@ -250,9 +277,9 @@ def main() -> None:
         _step(step, total_steps, "2", "Searching Web for Matches...")
         t0 = time.time()
         try:
-            # We use the CROPPED face to prevent Google Lens from searching the background
+            # Dual search: original image + cropped face
             search_result = stage_search(
-                face_result["cropped_path"], force_fresh=args.fresh_search
+                image_path, face_result["cropped_path"], force_fresh=args.fresh_search
             )
             if search_result.get("from_cache"):
                 _ok("(cached result — use --fresh-search for new API call)")

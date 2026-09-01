@@ -127,15 +127,14 @@ def _upload_catbox(path: Path) -> str:
     sess = _get_session()
     with path.open("rb") as fh:
         resp = sess.post(
-            "https://catbox.moe/user/api.php",
-            data={"reqtype": "fileupload"},
-            files={"fileToUpload": (path.name, fh)},
+            "https://uguu.se/upload.php",
+            files={"files[]": (path.name, fh)},
             timeout=_UPLOAD_TIMEOUT,
         )
     resp.raise_for_status()
-    url = resp.text.strip()
+    url = resp.json()["files"][0]["url"]
     if not url.startswith("http"):
-        raise RuntimeError(f"Catbox upload failed: {url}")
+        raise RuntimeError(f"Uguu upload failed: {url}")
     return url
 
 

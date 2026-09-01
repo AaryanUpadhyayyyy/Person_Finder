@@ -100,6 +100,21 @@ async def scan_face(file: UploadFile = File(...), serpapi_key: str = Form(None))
         skipped = verify_result.get("skipped", [])
         threshold = float(get_config()["SIMILARITY_THRESHOLD"])
         
+        # --- LLM Context Analysis for Best Match ---
+        llm_context_result = "N/A"
+        if best_match and best_match.get("verified", False):
+            try:
+                from utils.llm_context import analyze_context
+                groq_key = os.getenv("GROQ_API_KEY", "")
+                best_link = best_match.get("link")
+                print(f"Analyzing context for link: {best_link}")
+                llm_response = analyze_context(best_link, groq_key)
+                if llm_response:
+                    llm_context_result = llm_response
+            except Exception as e:
+                print("LLM analysis failed:", e)
+        # -------------------------------------------
+        
         # Build all candidates for the frontend (with thumbnail URLs)
         candidates = []
         for c in all_scored:
@@ -121,6 +136,7 @@ async def scan_face(file: UploadFile = File(...), serpapi_key: str = Form(None))
             "best_score": float(best_match["similarity"]) if best_match else 0.0,
             "best_source": str(best_match.get("source", "N/A")) if best_match else "N/A",
             "best_link": str(best_match.get("link", "#")) if best_match else "#",
+            "llm_context": llm_context_result,
             "threshold": threshold,
             
             # Face info

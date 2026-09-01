@@ -19,6 +19,7 @@ interface ScanResult {
   best_score: number;
   best_source: string;
   best_link: string;
+  llm_context?: string;
   threshold: number;
   faces_found: number;
   det_score: number;
@@ -372,6 +373,18 @@ export default function Home() {
             <span className="text-xs font-black uppercase mt-2 text-gray-800 tracking-widest">Confidence</span>
           </div>
         </div>
+
+        {/* ── AI IMAGE CONTEXT ── */}
+        {results?.passed && results?.llm_context && results.llm_context !== "N/A" && (
+          <div className="bg-white neo-border neo-shadow rounded-2xl p-6 flex flex-col gap-3">
+            <h3 className="font-black text-xl flex items-center gap-2">
+              <span className="text-talaash-pink">✨</span> AI Image Context
+            </h3>
+            <div className="bg-[#FDF8EE] p-4 rounded-xl neo-border text-sm font-bold text-gray-800 whitespace-pre-wrap leading-relaxed">
+              {results.llm_context}
+            </div>
+          </div>
+        )}
 
         {/* ── STATS GRID ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

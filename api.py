@@ -19,7 +19,10 @@ app = FastAPI(title="Talaash Face ID API")
 # Allow React frontend to connect
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in prod
+    allow_origins=[
+        "http://localhost:3000",
+        "https://person-finder-ten.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #000000;
+  
+  --color-talaash-yellow: #FDB813;
+  --color-talaash-green: #00A651;
+  --color-talaash-darkgreen: #005C29;
+  --color-talaash-pink: #D81B60;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-talaash-yellow: var(--color-talaash-yellow);
+  --color-talaash-green: var(--color-talaash-green);
+  --color-talaash-darkgreen: var(--color-talaash-darkgreen);
+  --color-talaash-pink: var(--color-talaash-pink);
+  
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Neobrutalism Utilities */
+@layer utilities {
+  .neo-border {
+    border: 3px solid #000;
+  }
+  .neo-shadow {
+    box-shadow: 4px 4px 0px 0px #000000;
+  }
+  .neo-shadow-hover:hover {
+    box-shadow: 2px 2px 0px 0px #000000;
+    transform: translate(2px, 2px);
+  }
+}

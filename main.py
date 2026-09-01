@@ -112,9 +112,13 @@ def stage_search(original_path: str, cropped_path: str, *, force_fresh: bool = F
     Searches BOTH the full image and the isolated face, then merges results.
     """
     from search.web_search import search_face_online
+    from concurrent.futures import ThreadPoolExecutor
 
-    res_orig = search_face_online(original_path, force_fresh=force_fresh)
-    res_crop = search_face_online(cropped_path, force_fresh=force_fresh)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_orig = executor.submit(search_face_online, original_path, force_fresh=force_fresh)
+        future_crop = executor.submit(search_face_online, cropped_path, force_fresh=force_fresh)
+        res_orig = future_orig.result()
+        res_crop = future_crop.result()
 
     # Merge and deduplicate candidates by their link
     seen = set()

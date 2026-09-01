@@ -57,27 +57,37 @@ def verify_candidates(
     scored: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
 
-    for cand in candidates:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def process_candidate(cand: Dict[str, str]) -> Dict[str, Any]:
         thumb_url = cand.get("thumbnail", "")
         if not thumb_url:
-            skipped.append(cand)
-            continue
-
+            return {"status": "skipped", "cand": cand}
         try:
             thumb_img = download_image(thumb_url)
             cand_emb, _ = get_face_embedding(thumb_img)
-        except (ValueError, Exception):
-            # no face in thumbnail or download failed — skip silently
-            skipped.append(cand)
-            continue
+            sim = float(np.dot(original_embedding, cand_emb))
+            return {
+                "status": "scored",
+                "cand": {
+                    **cand,
+                    "similarity": round(sim, 4),
+                    "verified": sim >= threshold,
+                    "_thumb_img": thumb_img,
+                }
+            }
+        except Exception:
+            return {"status": "skipped", "cand": cand}
 
-        sim = float(np.dot(original_embedding, cand_emb))
-        scored.append({
-            **cand,
-            "similarity": round(sim, 4),
-            "verified": sim >= threshold,
-            "_thumb_img": thumb_img,   # kept in-memory for comparison image
-        })
+    # Use ThreadPoolExecutor to run downloads and embeddings in parallel
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(process_candidate, c) for c in candidates]
+        for future in as_completed(futures):
+            res = future.result()
+            if res["status"] == "scored":
+                scored.append(res["cand"])
+            else:
+                skipped.append(res["cand"])
 
     # rank by similarity descending
     scored.sort(key=lambda x: x["similarity"], reverse=True)

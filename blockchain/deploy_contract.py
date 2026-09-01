@@ -66,7 +66,7 @@ def deploy(*, rpc_url: str | None = None, private_key: str | None = None) -> str
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
     addr: str = receipt["contractAddress"]
-    print(f"✓ Contract deployed at {addr}")
+    print(f"OK: Contract deployed at {addr}")
     print(f"  TX hash : {tx_hash.hex()}")
     print(f"  Block   : {receipt['blockNumber']}")
     print(f"  Gas used: {receipt['gasUsed']}")

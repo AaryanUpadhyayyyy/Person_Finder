@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Face Identification & Blockchain Verification — end-to-end CLI.
+"""Face Identification & Blockchain Verification â€” end-to-end CLI.
 
 Usage:
     python main.py --image photo.jpg
@@ -16,13 +16,13 @@ import sys
 import time
 from pathlib import Path
 
-# ── ensure project root is on sys.path ─────────────────────────────────
+# â”€â”€ ensure project root is on sys.path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 
-# ── pretty helpers (no external dep) ───────────────────────────────────
+# â”€â”€ pretty helpers (no external dep) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _ts() -> str:
     return time.strftime("%H:%M:%S")
@@ -40,16 +40,16 @@ def _step(n: int, total: int, icon: str, title: str):
     print("-" * 50)
 
 def _ok(msg: str):
-    print(f"  ✓ {msg}")
+    print(f"  [OK] {msg}")
 
 def _warn(msg: str):
-    print(f"  ⚠ {msg}")
+    print(f"  [WARN] {msg}")
 
 def _fail(msg: str):
-    print(f"  ✗ {msg}", file=sys.stderr)
+    print(f"  [FAIL] {msg}", file=sys.stderr)
 
 
-# ── CLI ────────────────────────────────────────────────────────────────
+# â”€â”€ CLI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -78,25 +78,33 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# ── pipeline stages ────────────────────────────────────────────────────
+# â”€â”€ pipeline stages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def stage_face(image_path: str) -> dict:
     """Stage 1: detect face + extract embedding."""
-    from face.face_scan import get_face_embedding, save_annotated_image
+    from face.face_scan import get_face_embedding, save_annotated_image, crop_and_save_face
     from utils.config import get_output_dir
 
     emb, meta = get_face_embedding(image_path)
-    _ok(f"Face detected — score {meta['det_score']:.2f}, "
+    _ok(f"Face detected â€” score {meta['det_score']:.2f}, "
         f"age {meta['age']}, gender {meta['gender']}")
     _ok(f"Embedding: {emb.shape[0]}-dim vector (L2-normalised)")
     _ok(f"Faces in image: {meta['num_faces']}")
 
+    out_dir = get_output_dir()
+    
     annotated = save_annotated_image(
-        image_path, str(get_output_dir() / "face_detected.jpg")
+        image_path, str(out_dir / "face_detected.jpg")
     )
-    _ok(f"Annotated image → {annotated}")
+    _ok(f"Annotated image -> {annotated}")
 
-    return {"embedding": emb, "meta": meta}
+    # Isolate face to prevent Google Lens from searching the background
+    cropped = crop_and_save_face(
+        image_path, str(out_dir / "face_cropped.jpg")
+    )
+    _ok(f"Cropped face for search -> {cropped}")
+
+    return {"embedding": emb, "meta": meta, "cropped_path": cropped}
 
 
 def stage_search(image_path: str, *, force_fresh: bool = False) -> dict:
@@ -113,11 +121,11 @@ def stage_search(image_path: str, *, force_fresh: bool = False) -> dict:
     if social:
         _ok(f"Social-media matches: {len(social)}")
         for m in social[:3]:
-            _ok(f"  → {m['source']}: {m['link'][:70]}")
+            _ok(f"  â†’ {m['source']}: {m['link'][:70]}")
     elif visual:
-        _warn("No social-media matches — using best visual match")
+        _warn("No social-media matches â€” using best visual match")
     else:
-        _warn("No matches found — pipeline will use self-hash mode")
+        _warn("No matches found â€” pipeline will use self-hash mode")
 
     return result
 
@@ -130,7 +138,7 @@ def stage_verify(
 
     tier = search_result["search_tier"]
     if tier == "no_match":
-        _warn("Skipping verification — no candidates to verify")
+        _warn("Skipping verification â€” no candidates to verify")
         return {"best_match": None, "all_scored": [], "skipped": [],
                 "comparison_image": None}
 
@@ -142,18 +150,18 @@ def stage_verify(
     best = result["best_match"]
 
     if best and best["verified"]:
-        _ok(f"MATCH — similarity {best['similarity']:.2f} "
+        _ok(f"MATCH â€” similarity {best['similarity']:.2f} "
             f"(threshold passed)")
         _ok(f"Source: {best.get('source', 'N/A')}")
         _ok(f"Link:   {best.get('link', 'N/A')[:80]}")
     elif best:
         _warn(f"Best candidate similarity {best['similarity']:.2f} "
-              f"— below threshold")
+              f"â€” below threshold")
     else:
         _warn("No candidate had a detectable face")
 
     if result["comparison_image"]:
-        _ok(f"Comparison image → {result['comparison_image']}")
+        _ok(f"Comparison image â†’ {result['comparison_image']}")
 
     scored_count = len(result["all_scored"])
     skip_count = len(result["skipped"])
@@ -197,15 +205,15 @@ def stage_blockchain(search_result: dict, verify_result: dict) -> dict:
     # re-verify
     verification = verify_proof(discovery, record_id=upload["record_id"])
     if verification["verified"]:
-        _ok("On-chain re-verification: TRUE ✓")
+        _ok("On-chain re-verification: TRUE âœ“")
     else:
-        _fail("On-chain re-verification: FALSE ✗ — data may be tampered")
+        _fail("On-chain re-verification: FALSE âœ— â€” data may be tampered")
 
     return {"upload": upload, "verification": verification,
             "discovery_data": discovery}
 
 
-# ── main ───────────────────────────────────────────────────────────────
+# â”€â”€ main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main() -> None:
     args = parse_args()
@@ -224,37 +232,38 @@ def main() -> None:
     total_steps = 4 - int(args.no_search) - int(args.no_blockchain)
     step = 0
 
-    # ── Stage 1: Face ──────────────────────────────────────────────
+    # â”€â”€ Stage 1: Face â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     step += 1
-    _step(step, total_steps, "🔍", "Encoding Face...")
+    _step(step, total_steps, "1", "Encoding Face...")
     t0 = time.time()
     face_result = stage_face(image_path)
-    _ok(f"⏱  {_sec(time.time() - t0)}")
+    _ok(f"Time: {_sec(time.time() - t0)}")
 
     search_result = {"search_tier": "no_match", "social_media_matches": [],
                      "visual_matches": [], "image_url": ""}
     verify_result = {"best_match": None, "all_scored": [], "skipped": [],
                      "comparison_image": None}
 
-    # ── Stage 2: Search ────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────────
     if not args.no_search:
         step += 1
-        _step(step, total_steps, "🌐", "Searching Web for Matches...")
+        _step(step, total_steps, "2", "Searching Web for Matches...")
         t0 = time.time()
         try:
+            # We use the CROPPED face to prevent Google Lens from searching the background
             search_result = stage_search(
-                image_path, force_fresh=args.fresh_search
+                face_result["cropped_path"], force_fresh=args.fresh_search
             )
             if search_result.get("from_cache"):
                 _ok("(cached result — use --fresh-search for new API call)")
         except Exception as exc:
             _warn(f"Search failed: {exc}")
             _warn("Continuing in self-hash mode")
-        _ok(f"⏱  {_sec(time.time() - t0)}")
+        _ok(f"Time: {_sec(time.time() - t0)}")
 
-        # ── Stage 3: Verify ────────────────────────────────────────
+        # ────────────────────────────────────────────────────────────────────────────
         step += 1
-        _step(step, total_steps, "✅", "Verifying Face Match...")
+        _step(step, total_steps, "3", "Verifying Face Match...")
         t0 = time.time()
         try:
             verify_result = stage_verify(
@@ -262,38 +271,38 @@ def main() -> None:
             )
         except Exception as exc:
             _warn(f"Verification failed: {exc}")
-        _ok(f"⏱  {_sec(time.time() - t0)}")
+        _ok(f"Time: {_sec(time.time() - t0)}")
 
-    # ── Stage 4: Blockchain ────────────────────────────────────────
+    # â”€â”€ Stage 4: Blockchain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     blockchain_result = {}
     if not args.no_blockchain:
         step += 1
-        _step(step, total_steps, "⛓️", "Blockchain Upload + Verification")
+        _step(step, total_steps, "4", "Blockchain Upload + Verification")
         t0 = time.time()
         try:
             blockchain_result = stage_blockchain(search_result, verify_result)
         except Exception as exc:
             _fail(f"Blockchain stage failed: {exc}")
             _warn("Ensure contract is deployed (python -m blockchain.deploy_contract)")
-        _ok(f"⏱  {_sec(time.time() - t0)}")
+        _ok(f"â±  {_sec(time.time() - t0)}")
 
-    # ── summary ────────────────────────────────────────────────────
+    # â”€â”€ summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     total = time.time() - pipeline_start
     print("\n" + "=" * 58)
-    print(f"  Pipeline complete — total time {_sec(total)}")
+    print(f"  Pipeline complete â€” total time {_sec(total)}")
 
     # save full result to JSON
     from utils.config import get_output_dir
     out_json = get_output_dir() / "result.json"
     _save_result(out_json, face_result, search_result,
                  verify_result, blockchain_result)
-    print(f"  Results saved → {out_json}")
+    print(f"  Results saved â†’ {out_json}")
     print("=" * 58 + "\n")
 
 
 def _save_result(path: Path, face: dict, search: dict,
                  verify: dict, chain: dict) -> None:
-    """Persist the full pipeline result as JSON (numpy → list)."""
+    """Persist the full pipeline result as JSON (numpy â†’ list)."""
     import numpy as np
 
     def _convert(obj):

@@ -104,6 +104,48 @@ def save_annotated_image(
     return output_path
 
 
+def crop_and_save_face(
+    image_input,
+    output_path: str,
+    *,
+    select: str = "largest",
+    margin_ratio: float = 0.5
+) -> str:
+    """Crop the selected face with a margin and save it.
+    
+    This forces search engines to focus on the face rather than the background.
+    """
+    img = _load_image(image_input)
+    app = _get_app()
+    faces = app.get(img)
+
+    if not faces:
+        raise ValueError("No face detected to crop.")
+
+    face = _pick_face(faces, select)
+    x1, y1, x2, y2 = face.bbox[:4]
+    
+    w = x2 - x1
+    h = y2 - y1
+    
+    # Add margin
+    margin_w = w * margin_ratio
+    margin_h = h * margin_ratio
+    
+    img_h, img_w = img.shape[:2]
+    
+    cx1 = max(0, int(x1 - margin_w))
+    cy1 = max(0, int(y1 - margin_h))
+    cx2 = min(img_w, int(x2 + margin_w))
+    cy2 = min(img_h, int(y2 + margin_h))
+    
+    cropped = img[cy1:cy2, cx1:cx2]
+    
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(output_path, cropped)
+    return output_path
+
+
 # ── internal helpers ───────────────────────────────────────────────────
 
 def _load_image(src) -> np.ndarray:

@@ -43,7 +43,7 @@ def compile_contract() -> dict:
     }
 
     _OUT_PATH.write_text(json.dumps(result, indent=2), encoding="utf-8")
-    print(f"✓ ABI + bytecode written → {_OUT_PATH}")
+    print(f"OK: ABI + bytecode written to {_OUT_PATH}")
     return result
 
 

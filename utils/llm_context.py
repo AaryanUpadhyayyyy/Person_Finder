@@ -4,7 +4,7 @@ from groq import Groq
 import os
 import sys
 
-def analyze_context(url: str, groq_api_key: str):
+def analyze_context(url: str, groq_api_key: str, score: float):
     if not url or url == "#" or not url.startswith("http"):
         return None
         
@@ -33,7 +33,16 @@ def analyze_context(url: str, groq_api_key: str):
         # Initialize Groq client
         client = Groq(api_key=groq_api_key)
         
-        prompt = f"""
+        if score < 0.80:
+            prompt = f"""
+I found an image on this webpage. Based on the following text extracted from the page, please answer this single question concisely:
+1. Who is the person in this image? (If mentioned)
+
+Extracted Text:
+{text_preview}
+"""
+        else:
+            prompt = f"""
 I found an image on this webpage. Based on the following text extracted from the page, please answer these three questions concisely:
 1. When was this picture taken? (or when was this article published?)
 2. What is the context of the image? (Why was it posted?)

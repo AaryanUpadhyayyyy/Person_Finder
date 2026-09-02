@@ -1,39 +1,25 @@
 "use client";
 
-import { useState, useRef, useEffect } from 'react';
-import { ScanFace, Upload, Search, ShieldCheck, CheckCircle, XCircle, ExternalLink, User, Globe, Hash, Layers, Printer, Key } from 'lucide-react';
+import { useState, useRef, useEffect, Suspense } from 'react';
+import dynamic from 'next/dynamic';
+import { ScanFace, Crosshair, Key, ExternalLink, User, Printer, XCircle, Play, Share2, MapPin, Mic, Sliders, Eye, Globe as GlobeIcon, Layers, Compass } from 'lucide-react';
+
+const EarthGlobe = dynamic(() => import('./components/EarthGlobe'), { ssr: false });
 
 type AppState = 'idle' | 'processing' | 'verified' | 'error';
 
-interface Candidate {
-  thumbnail: string;
-  link: string;
-  source: string;
-  title: string;
-  score: number;
-  verified: boolean;
-}
+interface Candidate { thumbnail: string; link: string; source: string; title: string; score: number; verified: boolean; }
+interface ScanResult { passed: boolean; best_score: number; best_source: string; best_link: string; llm_context?: string; threshold: number; faces_found: number; det_score: number; age: string; gender: string; candidates: Candidate[]; blockchain_tx: string; block_number: string; }
 
-interface ScanResult {
-  passed: boolean;
-  best_score: number;
-  best_source: string;
-  best_link: string;
-  llm_context?: string;
-  threshold: number;
-  faces_found: number;
-  det_score: number;
-  age: string;
-  gender: string;
-  social_matches: number;
-  visual_matches: number;
-  total_searched: number;
-  scored_count: number;
-  skipped_count: number;
-  from_cache: boolean;
-  candidates: Candidate[];
-  blockchain_tx: string;
-  block_number: string;
+function LiveClock() {
+  const [time, setTime] = useState('');
+  useEffect(() => {
+    const tick = () => setTime(new Date().toISOString().slice(11, 23).replace('T', ' ') + ' UTC');
+    tick();
+    const id = setInterval(tick, 100);
+    return () => clearInterval(id);
+  }, []);
+  return <>{time}</>;
 }
 
 export default function Home() {
@@ -44,6 +30,7 @@ export default function Home() {
   const [results, setResults] = useState<ScanResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [serpApiKey, setSerpApiKey] = useState('');
+  const [thresholdSlider, setThresholdSlider] = useState(40);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -51,48 +38,37 @@ export default function Home() {
     if (savedKey) setSerpApiKey(savedKey);
   }, []);
 
-  const bgImage = appState === 'verified' && results?.passed
-    ? "url('/bg2.png')" : "url('/Talaash_bg.png')";
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+      setSelectedFile(e.target.files[0]);
+      setPreviewUrl(URL.createObjectURL(e.target.files[0]));
     }
   };
 
   const handleStartTalaash = async () => {
     if (!selectedFile) return;
     setAppState('processing');
-    setPipelineStep(1); // Detecting & Encoding
-    
+    setPipelineStep(1);
     const formData = new FormData();
     formData.append("file", selectedFile);
-    if (serpApiKey.trim()) {
-      formData.append("serpapi_key", serpApiKey.trim());
-    }
+    if (serpApiKey.trim()) formData.append("serpapi_key", serpApiKey.trim());
     
-    // Realistic fake progress for the 5 steps while we wait for the long API call
     const timers = [
-      setTimeout(() => setPipelineStep(2), 2000),   // Google Lens Search
-      setTimeout(() => setPipelineStep(3), 5000),   // Verifying Candidates
-      setTimeout(() => setPipelineStep(4), 8000),   // Deep Search (Triple Engine)
-      setTimeout(() => setPipelineStep(5), 20000),  // Blockchain Record
+      setTimeout(() => setPipelineStep(2), 2000), setTimeout(() => setPipelineStep(3), 5000),
+      setTimeout(() => setPipelineStep(4), 8000), setTimeout(() => setPipelineStep(5), 20000),
     ];
-
     try {
-      // Use deployed backend URL if available, otherwise local
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${apiUrl}/api/scan`, {
-        method: "POST",
-        body: formData,
-      });
-      
+      const res = await fetch(`${apiUrl}/api/scan`, { method: "POST", body: formData });
       timers.forEach(clearTimeout);
-      
-      if (!res.ok) throw new Error("Pipeline failed or server is down");
-      
+      if (!res.ok) {
+        let errDetail = "Pipeline failed or server is down";
+        try {
+          const errData = await res.json();
+          if (errData.detail) errDetail = errData.detail;
+        } catch(e) {}
+        throw new Error(errDetail);
+      }
       const data: ScanResult = await res.json();
       setResults(data);
       setAppState('verified');
@@ -104,410 +80,675 @@ export default function Home() {
   };
 
   const handleReset = () => {
-    setAppState('idle');
-    setPipelineStep(0);
-    setSelectedFile(null);
-    setPreviewUrl(null);
-    setResults(null);
-    setErrorMsg(null);
+    setAppState('idle'); setPipelineStep(0); setSelectedFile(null); setPreviewUrl(null); setResults(null); setErrorMsg(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // The Canva elements
-  const CanvaElements = () => (
-    <>
-      {/* Background */}
-      <div 
-        className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-1000" 
-        style={{ backgroundImage: bgImage }} 
-      />
-    </>
-  );
-
-  const Header = () => (
-    <div className="relative z-10 text-center mt-12 mb-8">
-      <h1 
-        className="text-[82px] leading-none text-black drop-shadow-md"
-        style={{ fontFamily: "var(--font-leckerli-one), cursive" }}
-      >
-        Talaash
-      </h1>
-    </div>
-  );
-
-  // ─── IDLE: Upload Card ───
+  // ═══════════════════════════════════════════════════════
+  // ─── STATE: IDLE — Command Center UI ───
+  // ═══════════════════════════════════════════════════════
   if (appState === 'idle') {
     return (
-      <main className="min-h-screen w-full relative overflow-hidden flex flex-col items-center bg-[#FDF8EE] pb-8 px-4">
-        <CanvaElements />
+      <main className="h-screen w-screen bg-[#020202] overflow-hidden flex items-center justify-center p-2 md:p-6"
+        style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '30px 30px' }}>
         
-        {/* Custom API Key Input */}
-        <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-white/80 backdrop-blur neo-border px-3 py-1.5 rounded-xl shadow-sm">
-          <Key size={16} className="text-gray-500" />
-          <input 
-            type="password"
-            placeholder="Enter your SerpApi Key"
-            className="bg-transparent border-none outline-none text-sm w-56 placeholder-gray-500 text-black font-bold"
-            value={serpApiKey}
-            onChange={(e) => {
-              setSerpApiKey(e.target.value);
-              localStorage.setItem('serpApiKey', e.target.value);
-            }}
-          />
-        </div>
-
-        <Header />
+        {/* Outer Frame Wrapper */}
+        <div className="relative w-full h-full border border-[#222222] rounded-2xl bg-[#000000] overflow-hidden shadow-[0_0_80px_rgba(0,0,0,0.8)]">
         
-        <div className="relative z-10 w-full max-w-md bg-white neo-border neo-shadow p-6 rounded-2xl flex flex-col items-center text-center mt-4">
-          <div className="w-14 h-14 bg-talaash-yellow neo-border rounded-full flex items-center justify-center mb-4">
-            <ScanFace size={28} strokeWidth={2.5} className="text-black" />
-          </div>
-          <h2 className="text-2xl font-black mb-2 uppercase tracking-tight">Identity Scanner</h2>
-          <p className="text-gray-600 font-medium text-sm mb-6">Upload a photo to detect faces, reverse search, and verify via Blockchain.</p>
+          <style dangerouslySetInnerHTML={{__html: `
+            @keyframes text-reveal {
+              0% { opacity: 0; filter: blur(10px); transform: scale(1.05) translateY(-5px); letter-spacing: 0.1em; }
+              100% { opacity: 1; filter: blur(0); transform: scale(1) translateY(0); letter-spacing: 0.25em; }
+            }
+            @keyframes flicker {
+              0%, 19.999%, 22%, 62.999%, 64%, 64.999%, 70%, 100% { opacity: 1; }
+              20%, 21.999%, 63%, 63.999%, 65%, 69.999% { opacity: 0; filter: drop-shadow(0 0 5px #FF1111); }
+            }
+            @keyframes slide-in-left {
+              0% { opacity: 0; transform: translateX(-40px); }
+              100% { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes slide-in-right {
+              0% { opacity: 0; transform: translateX(40px); }
+              100% { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes scanline {
+              0% { transform: translateY(-100%); }
+              100% { transform: translateY(100vh); }
+            }
+            .anim-title { animation: text-reveal 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+            .anim-logo { animation: text-reveal 1s cubic-bezier(0.16, 1, 0.3, 1) forwards, flicker 4s infinite 2s; }
+            .anim-left { opacity: 0; animation: slide-in-left 1s cubic-bezier(0.16, 1, 0.3, 1) 0.6s forwards; }
+            .anim-right { opacity: 0; animation: slide-in-right 1s cubic-bezier(0.16, 1, 0.3, 1) 0.9s forwards; }
+            .scanline-overlay {
+              position: absolute; top: 0; left: 0; width: 100%; height: 5px;
+              background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.05), transparent);
+              opacity: 0.5; pointer-events: none; z-index: 50; animation: scanline 8s linear infinite;
+            }
+          `}} />
 
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full h-40 border-[3px] border-dashed border-black bg-gray-50 rounded-xl p-2 flex flex-col items-center justify-center mb-6 cursor-pointer hover:bg-talaash-yellow/10 transition-colors"
-          >
-            {previewUrl ? (
-              <img src={previewUrl} alt="Preview" className="h-full w-full object-contain" />
-            ) : (
-              <>
-                <Upload size={32} strokeWidth={2} className="mb-3 text-black" />
-                <span className="font-bold text-base">Click to Upload Face</span>
-              </>
-            )}
-          </div>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" />
+          {/* Scanline Effect */}
+          <div className="scanline-overlay" />
 
-          <button
-            onClick={handleStartTalaash}
-            disabled={!selectedFile || !serpApiKey.trim()}
-            className={`w-full font-black text-xl py-4 rounded-xl neo-border transition-all ${
-              selectedFile && serpApiKey.trim()
-                ? "bg-talaash-pink text-white neo-shadow hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-none cursor-pointer"
-                : "bg-gray-200 text-gray-400 cursor-not-allowed"
-            }`}
-          >
-            {(!serpApiKey.trim()) ? "ENTER API KEY FIRST" : "START TALAASH"}
-          </button>
+          {/* ── GLOBE (Z-0) ── */}
+          <Suspense fallback={null}>
+            <EarthGlobe />
+          </Suspense>
+
+          {/* ── TOP-CENTER GLOBE CONTROLS ── */}
+          <div className="absolute top-[80px] left-1/2 -translate-x-1/2 z-20 flex gap-2 pointer-events-auto">
+            {[Eye, GlobeIcon, Layers].map((Icon, i) => (
+              <button key={i} className="w-8 h-8 rounded-full border border-[#222222] bg-[#000000]/80 flex items-center justify-center hover:border-[#FF1111] hover:text-[#FF1111] text-[#777777] transition-colors cursor-pointer">
+                <Icon size={12} className="currentColor" />
+              </button>
+            ))}
+          </div>
+
+          {/* ── TOP BAR (Z-20) ── */}
+          <div className="absolute top-0 left-0 right-0 z-20 px-8 pt-8 pb-3 pointer-events-none flex justify-between items-start">
+            
+            {/* Top-Left: Logo & Metadata Stack */}
+            <div className="flex flex-col gap-3 pointer-events-auto">
+              <div className="flex items-center gap-3">
+                <div className="anim-logo w-6 h-6 rounded-full border border-[#FF1111] flex items-center justify-center">
+                  <Crosshair size={12} className="text-[#FF1111]" />
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="anim-title text-[18px] font-bold tracking-[0.25em] text-[#FFFFFF]">TALAASH</span>
+              </div>
+              <div className="anim-left ml-9 flex flex-col gap-1">
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#AAAAAA] tracking-[0.15em]">PIPELINE // FACE-ID // BLOCKCHAIN</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#FF1111] tracking-[0.15em] font-bold">MODE: ACTIVE</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777] tracking-[0.1em] uppercase">TARGET SECTOR: GLOBAL</span>
+              </div>
+            </div>
+
+            {/* Top-Right: Status & Actions */}
+            <div className="anim-right flex gap-6 pointer-events-auto items-start">
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#FF1111] animate-pulse" />
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[12px] font-bold text-[#FF1111] tracking-[0.2em]">
+                    {selectedFile ? 'SCANNING' : 'ACTIVE'}
+                  </span>
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#AAAAAA] tracking-[0.1em]">
+                  <LiveClock />
+                </span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[8px] text-[#555555] tracking-[0.1em]">
+                  SESSION FID-2026-0847
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button className="w-8 h-8 rounded-full border border-[#333333] flex items-center justify-center hover:border-[#FF1111] hover:text-[#FF1111] text-[#AAAAAA] transition-colors bg-[#000000]/50 cursor-pointer">
+                  <Play size={12} className="ml-0.5 currentColor" />
+                </button>
+                <button className="w-8 h-8 rounded-full border border-[#333333] flex items-center justify-center hover:border-[#FF1111] hover:text-[#FF1111] text-[#AAAAAA] transition-colors bg-[#000000]/50 cursor-pointer">
+                  <Share2 size={12} className="currentColor" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── LEFT SIDEBAR (Z-20) ── */}
+          <div className="anim-left absolute left-8 top-[140px] z-20 w-[260px] flex flex-col gap-4 pointer-events-auto">
+            {/* Configuration Block (API Key) */}
+            <div className="border border-[#222222] rounded bg-[#000000]/80 p-4 backdrop-blur-sm hover:border-[#444444] transition-colors flex flex-col gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Key size={12} className="text-[#FFFFFF]" />
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">API ACCESS KEY</span>
+                </div>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  placeholder="Enter SerpApi Key"
+                  style={{ fontFamily: "'JetBrains Mono', monospace", WebkitTextSecurity: "disc" }}
+                  className="w-full bg-[#111111] border border-[#222222] rounded px-3 py-2 text-[10px] text-[#FFFFFF] placeholder-[#555555] outline-none focus:border-[#FF1111] transition-colors"
+                  value={serpApiKey}
+                  onChange={(e) => { setSerpApiKey(e.target.value); localStorage.setItem('serpApiKey', e.target.value); }}
+                />
+              </div>
+            </div>
+
+            {/* Upload */}
+            <div className="border border-[#222222] rounded bg-[#000000]/80 p-4 backdrop-blur-sm hover:border-[#444444] transition-colors">
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF] block mb-3">IDENTITY SCANNER</span>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="group w-full h-[140px] border border-dashed border-[#444444] rounded flex flex-col items-center justify-center cursor-pointer hover:border-[#FF1111] hover:bg-[#FF1111]/5 transition-all bg-[#050505]"
+              >
+                {previewUrl ? (
+                  <img src={previewUrl} alt="Preview" className="h-full w-full object-cover rounded p-1" />
+                ) : (
+                  <>
+                    <ScanFace size={28} className="text-[#AAAAAA] group-hover:text-[#FF1111] transition-colors mb-3" strokeWidth={1.5} />
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#AAAAAA] group-hover:text-[#FF1111] transition-colors">CLICK TO UPLOAD FACE</span>
+                  </>
+                )}
+              </div>
+              <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" />
+              
+              <button
+                onClick={handleStartTalaash}
+                disabled={!selectedFile || !serpApiKey.trim()}
+                style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                className={`w-full mt-4 text-[10px] font-bold tracking-[0.2em] py-3 rounded transition-all ${
+                  selectedFile && serpApiKey.trim() ? "bg-[#FF1111] text-[#FFFFFF] cursor-pointer hover:opacity-90 shadow-[0_0_15px_rgba(255,17,17,0.4)]" : "bg-[#111111] text-[#555555] cursor-not-allowed"
+                }`}
+              >
+                {!serpApiKey.trim() ? "ENTER API KEY" : "INITIATE SCAN"}
+              </button>
+            </div>
+          </div>
+
+          {/* ── RIGHT SIDEBAR (Z-20) ── */}
+          <div className="anim-right absolute right-8 top-[140px] z-20 w-[280px] flex flex-col gap-4 pointer-events-auto">
+            {/* Talaash Description */}
+            <div className="border border-[#222222] rounded bg-[#000000]/80 p-4 backdrop-blur-sm hover:border-[#444444] transition-colors relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1 h-full bg-[#FF1111]" />
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FF1111] block mb-2 font-bold ml-2">SYSTEM OVERVIEW</span>
+              <p className="text-[11px] leading-relaxed text-[#AAAAAA] ml-2">
+                TALAASH is an advanced Face Identification & Blockchain Verification system. It utilizes triple-engine deep search (Google, Yandex, Bing) coupled with biometric AI to track and verify human identities across the global intelligence network. All verified records are permanently hashed onto the Sepolia blockchain.
+              </p>
+            </div>
+
+            {/* Recent Verified Log */}
+            <div className="border border-[#222222] rounded bg-[#000000]/80 p-4 backdrop-blur-sm hover:border-[#444444] transition-colors">
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF] block mb-3 font-bold">VERIFIED LOG</span>
+              <div className="flex flex-col gap-2">
+                {[
+                  {id: 'REC-0091', stat: 'VERIFIED', col: '#FFFFFF'},
+                  {id: 'REC-0090', stat: 'NO MATCH', col: '#FF1111'},
+                  {id: 'REC-0089', stat: 'VERIFIED', col: '#FFFFFF'}
+                ].map((r, i) => (
+                  <div key={i} className="flex items-center justify-between py-1.5 border-b border-[#111111] last:border-0">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: r.col}} />
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#AAAAAA] tracking-wider">{r.id}</span>
+                    </div>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: r.col }} className="text-[9px] tracking-[0.1em] font-bold">{r.stat}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Threshold meter */}
+            <div className="border border-[#222222] rounded bg-[#000000]/80 p-4 backdrop-blur-sm hover:border-[#444444] transition-colors">
+              <div className="flex justify-between items-center mb-3">
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">MATCH THRESHOLD</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FF1111] font-bold">{(thresholdSlider / 100).toFixed(2)}</span>
+              </div>
+              <input 
+                type="range" min="0" max="100" value={thresholdSlider} onChange={(e) => setThresholdSlider(Number(e.target.value))}
+                className="w-full h-1 bg-gradient-to-r from-[#555555] to-[#FF1111] rounded appearance-none cursor-pointer"
+                style={{ WebkitAppearance: 'none' }}
+              />
+              <style jsx>{`
+                input[type='range']::-webkit-slider-thumb {
+                  -webkit-appearance: none; appearance: none; width: 8px; height: 14px; background: #FFFFFF; cursor: pointer; border-radius: 1px;
+                }
+              `}</style>
+            </div>
+          </div>
+
+          {/* ── BOTTOM-LEFT TELEMETRY (Z-20) ── */}
+          <div className="anim-left absolute bottom-8 left-8 z-20 pointer-events-none flex items-center gap-4">
+            <div className="w-10 h-10 rounded-full border border-[#333333] bg-[#000000]/80 flex items-center justify-center text-[#777777]">
+              <Compass size={18} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777] tracking-[0.15em] uppercase">LOC: GLOBAL COORDS</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777] tracking-[0.15em] uppercase">REF: GEO-TRACK-GLB-8472</span>
+            </div>
+          </div>
+
+          {/* ── BOTTOM DOCK COMMAND CENTER (Z-20) ── */}
+          <div className="anim-title absolute bottom-8 left-0 right-0 z-20 flex items-center justify-center gap-6 pointer-events-auto">
+            {/* Location */}
+            <button className="border border-[#222222] rounded-full bg-[#000000]/90 px-6 py-2.5 flex items-center gap-2 hover:border-[#FF1111] hover:text-[#FF1111] text-[#AAAAAA] transition-colors cursor-pointer backdrop-blur-sm">
+              <MapPin size={12} className="currentColor" />
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.15em] currentColor font-bold">LOCATION</span>
+            </button>
+            
+            {/* Voice Command Module */}
+            <button className="group border border-[#222222] rounded-full bg-[#000000]/90 px-8 py-2.5 flex items-center gap-4 hover:border-[#FF1111] transition-colors cursor-pointer backdrop-blur-sm">
+              <Mic size={14} className="text-[#FF1111]" />
+              <div className="flex items-center gap-0.5">
+                {[
+                  {h: 2, op: 0.6}, {h: 4, op: 0.8}, {h: 7, op: 0.9}, 
+                  {h: 10, op: 1.0}, {h: 6, op: 0.7}, {h: 8, op: 0.9}, 
+                  {h: 3, op: 0.6}, {h: 5, op: 0.8}, {h: 2, op: 0.5}
+                ].map((bar, i) => (
+                  <div key={i} className="w-[2px] bg-[#FF1111] rounded-full group-hover:animate-pulse" style={{ height: `${bar.h+4}px`, opacity: bar.op }} />
+                ))}
+              </div>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#FF1111] font-bold">VOICE COMMAND</span>
+            </button>
+
+            {/* Visual Presets / Network */}
+            <button className="border border-[#222222] rounded-full bg-[#000000]/90 px-6 py-2.5 flex items-center gap-2 hover:border-[#FF1111] hover:text-[#FF1111] text-[#AAAAAA] transition-colors cursor-pointer backdrop-blur-sm">
+              <Sliders size={12} className="currentColor" />
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.15em] currentColor font-bold">NETWORK</span>
+            </button>
+          </div>
+
         </div>
       </main>
     );
   }
 
-  // ─── PROCESSING: Pipeline Steps ───
+  // ═══════════════════════════════════════════
+  // ─── STATE: PROCESSING — Pipeline Steps ───
+  // ═══════════════════════════════════════════
   if (appState === 'processing') {
     const steps = [
-      { icon: <ScanFace size={20} strokeWidth={3} />, label: "Detecting & Encoding Face", sub: "InsightFace AI analyzing landmarks..." },
-      { icon: <Search size={20} strokeWidth={3} />, label: "Google Lens Search", sub: "Dual search: original + cropped face..." },
-      { icon: <ScanFace size={20} strokeWidth={3} />, label: "Verifying Candidates", sub: "Multi-face scoring with HD fallback..." },
-      { icon: <Globe size={20} strokeWidth={3} />, label: "Deep Search (Yandex + Bing)", sub: "Triple engine parallel scan..." },
-      { icon: <ShieldCheck size={20} strokeWidth={3} />, label: "Blockchain Record", sub: "Hashing & uploading proof on-chain..." },
+      { label: `TARGET: GLOBAL`, sub: "Initializing localized search parameters..." },
+      { label: "DETECTING & ENCODING FACE", sub: "InsightFace AI analyzing landmarks..." },
+      { label: "GOOGLE LENS & DEEP SEARCH", sub: `Dual search targeting Global networks...` },
+      { label: "VERIFYING CANDIDATES", sub: "Multi-face scoring with HD fallback..." },
+      { label: "BLOCKCHAIN RECORD", sub: "Hashing & uploading proof on-chain..." },
     ];
+    const progress = Math.min(95, pipelineStep * 20);
 
     return (
-      <main className="min-h-screen w-full relative overflow-hidden flex flex-col items-center bg-[#FDF8EE] pb-8 px-4">
-        <CanvaElements />
-        <Header />
+      <main className="h-screen w-screen bg-[#020202] flex items-center justify-center p-2 md:p-6 overflow-hidden relative"
+        style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '30px 30px' }}>
         
-        <div className="relative z-10 w-full max-w-md mt-4 flex flex-col gap-4">
+        <div className="relative w-full h-full border border-[#222222] rounded-2xl bg-[#000000] overflow-hidden flex items-center justify-center shadow-[0_0_80px_rgba(0,0,0,0.8)]">
           
-          {/* Image Preview Card */}
-          {previewUrl && (
-            <div className="bg-white neo-border neo-shadow rounded-2xl p-4 flex items-center gap-4">
-              <div className="w-20 h-20 rounded-xl neo-border overflow-hidden flex-shrink-0">
-                <img src={previewUrl} alt="Scanning" className="w-full h-full object-cover" />
+          {/* GLOBE BACKGROUND (Z-0) */}
+          <Suspense fallback={null}>
+            <EarthGlobe />
+          </Suspense>
+
+          {/* BOTTOM-LEFT TELEMETRY (Z-20) */}
+          <div className="absolute bottom-8 left-8 z-20 pointer-events-none flex items-center gap-4">
+            <div className="w-10 h-10 rounded-full border border-[#333333] bg-[#000000]/80 flex items-center justify-center text-[#777777]">
+              <Compass size={18} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777] tracking-[0.15em] uppercase">LOC: GLOBAL COORDS</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777] tracking-[0.15em] uppercase">REF: GEO-TRACK-GLB-8472</span>
+            </div>
+          </div>
+
+          {/* CENTERED COLUMN (Z-20) */}
+          <div className="w-full max-w-[440px] flex flex-col gap-4 relative z-20 pointer-events-auto">
+            
+            {/* Top Bar Inside Column */}
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 rounded-full border border-[#FF1111] flex items-center justify-center">
+                  <Crosshair size={10} className="text-[#FF1111]" />
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[15px] font-bold tracking-[0.25em] text-[#FFFFFF]">TALAASH</span>
+              </div>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] text-[#FF1111] tracking-[0.2em] font-bold animate-pulse">SCANNING...</span>
+            </div>
+
+            {/* 1. SCAN PROGRESS PANEL */}
+            <div className="border border-[#222222] rounded-sm bg-[#0A0A0A]/95 p-5 shadow-2xl backdrop-blur-md">
+              <div className="flex items-center justify-between mb-4">
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">SCAN PROGRESS</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[12px] font-bold text-[#FF1111]">{progress}%</span>
+              </div>
+              <div className="w-full h-[3px] bg-[#1A1A1A] rounded-none overflow-hidden">
+                <div className="h-full bg-[#FF1111] rounded-none transition-all duration-1000" style={{ width: `${progress}%` }} />
+              </div>
+            </div>
+
+            {/* 2. CANDIDATE MATCH CARD */}
+            <div className="border border-[#222222] rounded-sm bg-[#0A0A0A]/95 p-4 flex items-center gap-4 backdrop-blur-md">
+              <div className="w-12 h-12 rounded-sm border border-[#333333] overflow-hidden flex-shrink-0 bg-[#000000] flex items-center justify-center">
+                {previewUrl ? (
+                   <img src={previewUrl} alt="Candidate" className="w-full h-full object-cover opacity-70" />
+                ) : (
+                   <User size={18} className="text-[#555555]" />
+                )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-black text-sm text-gray-800 truncate">{selectedFile?.name}</p>
-                <p className="text-xs text-gray-500 font-bold mt-1">Scanning in progress...</p>
-                <div className="mt-2 h-2 bg-gray-200 rounded-full neo-border overflow-hidden">
-                  <div className="h-full bg-talaash-pink rounded-full animate-pulse" style={{ width: `${Math.min(95, pipelineStep * 25)}%`, transition: 'width 1s ease' }}></div>
-                </div>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FFFFFF] truncate">
+                  {selectedFile?.name || "CANDIDATE_ID_PENDING..."}
+                </p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.15em] text-[#777777] mt-1.5">
+                  TARGET: GLOBAL
+                </p>
+              </div>
+              <div className="w-4 h-4 border border-[#333333] border-t-[#FF1111] rounded-full animate-spin flex-shrink-0" />
+            </div>
+
+            {/* 3. VERIFICATION PIPELINE PANEL */}
+            <div className="border border-[#222222] rounded-sm bg-[#0A0A0A]/95 overflow-hidden backdrop-blur-md shadow-2xl">
+              <div className="px-5 py-3 border-b border-[#222222]">
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">VERIFICATION PIPELINE</span>
+              </div>
+              <div className="flex flex-col">
+                {steps.map((step, i) => {
+                  const sn = i + 1;
+                  const active = pipelineStep === sn;
+                  const done = pipelineStep > sn;
+                  return (
+                    <div key={i} className={`flex items-center gap-4 px-5 py-3.5 border-b border-[#1A1A1A] last:border-0 ${active ? 'bg-[#111111]/90' : ''}`}>
+                      <div className="w-4 flex justify-center flex-shrink-0">
+                        {done ? (
+                          <div className="w-2 h-2 rounded-full bg-[#FFFFFF]" />
+                        ) : active ? (
+                          <div className="w-3.5 h-3.5 border border-[#444444] border-t-[#FF1111] rounded-full animate-spin" />
+                        ) : (
+                          <div className="w-2 h-2 rounded-full border border-[#444444]" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p style={{ fontFamily: "'JetBrains Mono', monospace" }} className={`text-[10px] tracking-[0.08em] ${done ? 'text-[#AAAAAA]' : active ? 'text-[#FFFFFF] font-bold' : 'text-[#555555]'}`}>
+                          {step.label}
+                        </p>
+                        {active && <p className="text-[10px] text-[#777777] mt-1.5 font-['Inter'] tracking-wide">{step.sub}</p>}
+                      </div>
+                      {done && <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#FFFFFF] tracking-[0.15em] font-bold">DONE</span>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          )}
 
-          {/* Pipeline Steps Card */}
-          <div className="bg-white neo-border neo-shadow p-5 rounded-2xl">
-            <h2 className="font-black text-base mb-4 border-b-[3px] border-black pb-2 text-center uppercase tracking-wide">Verification Pipeline</h2>
-            <div className="space-y-3">
-              {steps.map((step, i) => {
-                const stepNum = i + 1;
-                const isActive = pipelineStep === stepNum;
-                const isDone = pipelineStep > stepNum;
-                const isPending = pipelineStep < stepNum;
-
-                return (
-                  <div key={i} className={`flex items-start gap-3 p-2.5 rounded-xl transition-all duration-300 ${isActive ? 'bg-talaash-yellow/15 neo-border' : isDone ? 'opacity-60' : 'opacity-30'}`}>
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 neo-border ${isDone ? 'bg-talaash-green text-white' : isActive ? 'bg-talaash-yellow text-black animate-pulse' : 'bg-gray-100 text-gray-400'}`}>
-                      {isDone ? <CheckCircle size={16} strokeWidth={3} /> : step.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`font-black text-sm ${isPending ? 'text-gray-400' : 'text-black'}`}>{step.label}</p>
-                      {isActive && <p className="text-[11px] text-gray-500 font-bold mt-0.5 animate-pulse">{step.sub}</p>}
-                    </div>
-                    {isDone && <span className="text-[10px] font-black text-talaash-green uppercase mt-1">Done</span>}
-                    {isActive && (
-                      <div className="flex gap-0.5 mt-2">
-                        <div className="w-1.5 h-1.5 bg-talaash-pink rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                        <div className="w-1.5 h-1.5 bg-talaash-pink rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                        <div className="w-1.5 h-1.5 bg-talaash-pink rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
           </div>
-
-          {/* Tip */}
-          <div className="text-center px-4">
-            <p className="text-xs font-bold text-gray-400">💡 Triple Engine Deep Search scans Google, Yandex & Bing simultaneously</p>
-          </div>
-
         </div>
       </main>
     );
   }
 
-  // ─── ERROR ───
+  // ═══════════════════
+  // ─── STATE: ERROR ───
+  // ═══════════════════
   if (appState === 'error') {
     return (
-      <main className="min-h-screen w-full relative overflow-hidden flex flex-col items-center bg-[#FDF8EE] pb-8 px-4">
-        <CanvaElements />
-        <Header />
-        
-        <div className="relative z-10 w-full max-w-md bg-white neo-border neo-shadow p-8 rounded-2xl text-center mt-4">
-          <XCircle size={48} className="mx-auto mb-4 text-red-600" />
-          <h2 className="font-black text-2xl text-red-700">Error Occurred</h2>
-          <p className="text-base font-medium mt-3 text-gray-700">{errorMsg}</p>
-          <button onClick={handleReset} className="w-full mt-6 bg-black text-white font-black py-4 rounded-xl neo-border cursor-pointer text-lg">TRY AGAIN</button>
+      <main className="h-screen w-screen bg-[#020202] flex items-center justify-center p-2 md:p-6"
+        style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '30px 30px' }}>
+        <div className="relative w-full h-full border border-[#222222] rounded-2xl bg-[#000000] overflow-hidden flex items-center justify-center shadow-[0_0_80px_rgba(0,0,0,0.8)]">
+          <div className="w-full max-w-md border border-[#444444] rounded bg-[#0A0A0A] p-8 text-center shadow-[0_0_30px_rgba(255,17,17,0.1)]">
+            <div className="w-10 h-10 rounded-full border border-[#FF1111] flex items-center justify-center mx-auto mb-4">
+              <XCircle size={20} className="text-[#FF1111]" />
+            </div>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[12px] font-bold tracking-[0.2em] text-[#FF1111]">STATUS: ERROR</span>
+            <p className="text-[13px] text-[#FFFFFF] mt-5 mb-8 leading-relaxed">{errorMsg}</p>
+            <button onClick={handleReset} style={{ fontFamily: "'JetBrains Mono', monospace" }} className="w-full text-[11px] font-bold tracking-[0.2em] py-4 rounded bg-[#111111] border border-[#444444] text-[#FFFFFF] hover:border-[#FF1111] transition-colors cursor-pointer">
+              RETRY SCAN
+            </button>
+          </div>
         </div>
       </main>
     );
   }
+  // ═══════════════════════════════════════════
+  // ─── STATE: VERIFIED — Final Dashboard ───
+  // ═══════════════════════════════════════════
+  if (appState === 'verified' && results) {
+    const bestMatch = results.candidates.length > 0 ? results.candidates[0] : null;
 
-  // ─── VERIFIED: Professional Dashboard Results ───
-  const bestCandidateThumb = results?.candidates?.find(c => c.verified)?.thumbnail || results?.candidates?.[0]?.thumbnail;
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  return (
-    <main className="min-h-screen w-full bg-[#FDF8EE] overflow-y-auto pb-16 font-sans text-black print:bg-white print:pb-0">
-      
-      {/* Navbar */}
-      <nav className="w-full border-b-[3px] border-black bg-white mb-6 sticky top-0 z-50 print:hidden">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <h1 
-            className="text-3xl leading-none text-black drop-shadow-sm mt-1"
-            style={{ fontFamily: "var(--font-leckerli-one), cursive" }}
-          >
-            Talaash
-          </h1>
-          <div className="flex gap-3">
-            <button
-              onClick={handlePrint}
-              className="bg-white text-black font-black text-xs px-5 py-2.5 rounded-lg neo-border hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-none transition-all cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex items-center gap-2"
-            >
-              <Printer size={16} /> SAVE REPORT
-            </button>
-            <button
-              onClick={handleReset}
-              className="bg-black text-white font-black text-xs px-5 py-2.5 rounded-lg neo-border hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-none transition-all cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex items-center gap-2"
-            >
-              <ScanFace size={16} /> NEW SCAN
-            </button>
-          </div>
-        </div>
-      </nav>
-
-      <div className="max-w-6xl mx-auto px-6 flex flex-col gap-6">
-
-        {/* ── HERO MATCH CARD ── */}
-        <div className={`w-full neo-border neo-shadow rounded-2xl p-6 flex flex-col lg:flex-row items-center justify-between gap-6 ${results?.passed ? 'bg-[#E7F8E8]' : 'bg-[#FEECEB]'}`}>
+    return (
+      <main className="h-screen w-screen bg-[#020202] flex items-center justify-center p-2 md:p-6 overflow-hidden relative"
+        style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '30px 30px' }}>
+        
+        <div className="relative w-full h-full border border-[#222222] rounded-2xl bg-[#000000] overflow-hidden flex shadow-[0_0_80px_rgba(0,0,0,0.8)]">
           
-          {/* Left: Images */}
-          <div className="flex items-center gap-3">
-            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl neo-border overflow-hidden bg-white shadow-inner">
-              <img src={previewUrl!} alt="Target" className="w-full h-full object-cover" />
+          {/* GLOBE BACKGROUND (Z-0) */}
+          <Suspense fallback={null}>
+            <EarthGlobe />
+          </Suspense>
+
+          {/* TELEMETRY OVERLAYS */}
+          <div className="absolute top-6 left-6 z-20 flex items-center gap-3 pointer-events-none">
+            <div className="w-6 h-6 rounded-full border border-[#FF1111] flex items-center justify-center">
+              <Crosshair size={12} className="text-[#FF1111]" />
             </div>
-            <div className="flex flex-col gap-1 items-center justify-center px-1">
-              <div className="w-6 h-1 bg-black rounded-full"></div>
-              <div className="w-6 h-1 bg-black rounded-full"></div>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[16px] font-bold tracking-[0.25em] text-[#FFFFFF]">TALAASH</span>
+          </div>
+
+          <div className="absolute top-6 right-6 z-20 flex items-center gap-4 pointer-events-auto">
+            <button 
+              onClick={() => window.print()}
+              className="flex items-center gap-2 px-4 py-2 border border-[#333333] hover:border-[#FFFFFF] bg-[#0A0A0A]/90 text-[#FFFFFF] rounded-sm transition-colors backdrop-blur-md"
+            >
+              <Printer size={12} />
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-wider font-bold">EXPORT</span>
+            </button>
+            <button 
+              onClick={() => { setAppState('idle'); setResults(null); setSelectedFile(null); setPreviewUrl(''); }}
+              className="flex items-center gap-2 px-4 py-2 bg-[#FF1111] text-[#FFFFFF] font-bold rounded-sm hover:bg-[#CC0000] transition-colors"
+            >
+              <ScanFace size={12} />
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-wider">NEW SCAN</span>
+            </button>
+          </div>
+
+          <div className="absolute bottom-6 left-6 z-20 pointer-events-none flex items-center gap-4">
+            <div className="w-10 h-10 rounded-full border border-[#333333] bg-[#0A0A0A]/90 backdrop-blur-md flex items-center justify-center text-[#777777]">
+              <Compass size={18} />
             </div>
-            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl neo-border overflow-hidden bg-white shadow-inner flex items-center justify-center">
-              {bestCandidateThumb ? (
-                <img src={bestCandidateThumb} alt="Match" className="w-full h-full object-cover" />
-              ) : (
-                <User size={32} className="text-gray-300" />
-              )}
+            <div className="flex flex-col gap-1">
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777] tracking-[0.15em] uppercase">LOC: GLOBAL COORDS</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777] tracking-[0.15em] uppercase">REF: GEO-TRACK-GLB-8472</span>
             </div>
           </div>
 
-          {/* Middle: Verdict */}
-          <div className="flex-1 text-center lg:text-left flex flex-col justify-center px-2">
-            <span className="inline-block bg-black text-white text-[10px] font-black px-2.5 py-1 rounded uppercase mb-2 w-max mx-auto lg:mx-0">
-              Final Verdict
-            </span>
-            <h2 className={`font-black text-3xl sm:text-4xl leading-none mb-2 tracking-tight ${results?.passed ? 'text-talaash-darkgreen' : 'text-red-700'}`}>
-              {results?.passed ? 'IDENTITY VERIFIED' : 'NO MATCH FOUND'}
-            </h2>
-            {results?.passed ? (
-               <p className="text-sm font-bold text-gray-700">
-                Confirmed match found on <a href={results?.best_link} target="_blank" className="underline decoration-2 text-blue-600 hover:text-blue-800 transition-colors">{results?.best_source}</a>
-              </p>
-            ) : (
-              <p className="text-sm font-bold text-gray-700">Similarity below threshold ({results?.threshold})</p>
-            )}
-          </div>
-
-          {/* Right: Score */}
-          <div className="flex flex-col items-center justify-center lg:border-l-[3px] border-black lg:pl-8 pt-5 lg:pt-0 w-full lg:w-auto border-t-[3px] lg:border-t-0">
-             <div className={`text-white font-black text-5xl px-5 py-3 rounded-xl neo-border shadow-[4px_4px_0px_0px_rgba(0,0,0,0.15)] ${results?.passed ? 'bg-talaash-green' : 'bg-red-600'}`}>
-              {results?.best_score.toFixed(2)}
+          {/* STATS BAR (BOTTOM CENTER) */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex items-center gap-2">
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm px-4 py-2 flex flex-col items-center min-w-[120px] shadow-2xl">
+               <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[16px] font-bold text-[#FFFFFF]">{results.faces_found}</span>
+               <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[8px] text-[#777777] tracking-[0.1em] mt-1 uppercase">FACES DETECTED</span>
             </div>
-            <span className="text-xs font-black uppercase mt-2 text-gray-800 tracking-widest">Confidence</span>
-          </div>
-        </div>
-
-        {/* ── AI IMAGE CONTEXT ── */}
-        {results?.passed && results?.llm_context && results.llm_context !== "N/A" && (
-          <div className="bg-white neo-border neo-shadow rounded-2xl p-6 flex flex-col gap-3">
-            <h3 className="font-black text-xl flex items-center gap-2">
-              <span className="text-talaash-pink">✨</span> AI Image Context
-            </h3>
-            <div className="bg-[#FDF8EE] p-4 rounded-xl neo-border text-sm font-bold text-gray-800 whitespace-pre-wrap leading-relaxed">
-              {results.llm_context}
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm px-4 py-2 flex flex-col items-center min-w-[120px] shadow-2xl">
+               <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[16px] font-bold text-[#FFFFFF]">{results.total_searched}</span>
+               <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[8px] text-[#777777] tracking-[0.1em] mt-1 uppercase">WEB LINKS</span>
+            </div>
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm px-4 py-2 flex flex-col items-center min-w-[120px] shadow-2xl">
+               <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[16px] font-bold text-[#FFFFFF]">{results.scored_count}</span>
+               <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[8px] text-[#777777] tracking-[0.1em] mt-1 uppercase">FACES SCORED</span>
+            </div>
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm px-4 py-2 flex flex-col items-center min-w-[120px] shadow-2xl">
+               <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[16px] font-bold text-[#FFFFFF]">{results.skipped_count}</span>
+               <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[8px] text-[#777777] tracking-[0.1em] mt-1 uppercase">SKIPPED</span>
             </div>
           </div>
-        )}
 
-        {/* ── STATS GRID ── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white neo-border neo-shadow rounded-2xl p-5 flex flex-col items-center justify-center hover:-translate-y-1 transition-transform">
-            <User size={28} className="mb-2 text-talaash-pink" strokeWidth={2.5} />
-            <p className="font-black text-3xl mb-1">{results?.faces_found}</p>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Faces Detected</p>
-          </div>
-          <div className="bg-white neo-border neo-shadow rounded-2xl p-5 flex flex-col items-center justify-center hover:-translate-y-1 transition-transform">
-            <Globe size={28} className="mb-2 text-talaash-green" strokeWidth={2.5} />
-            <p className="font-black text-3xl mb-1">{results?.total_searched}</p>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Web Links</p>
-          </div>
-          <div className="bg-white neo-border neo-shadow rounded-2xl p-5 flex flex-col items-center justify-center hover:-translate-y-1 transition-transform">
-            <CheckCircle size={28} className="mb-2 text-talaash-yellow" strokeWidth={2.5} />
-            <p className="font-black text-3xl mb-1">{results?.scored_count}</p>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Faces Scored</p>
-          </div>
-          <div className="bg-white neo-border neo-shadow rounded-2xl p-5 flex flex-col items-center justify-center hover:-translate-y-1 transition-transform">
-            <Hash size={28} className="mb-2 text-gray-400" strokeWidth={2.5} />
-            <p className="font-black text-3xl mb-1">{results?.skipped_count}</p>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Skipped (No Face)</p>
-          </div>
-        </div>
-
-        {/* ── DETAILS ROW ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
-          <div className="bg-white neo-border neo-shadow rounded-2xl p-6 flex flex-col">
-            <h3 className="font-black text-xl mb-5 flex items-center gap-2">
-              <ScanFace size={24} className="text-talaash-yellow" strokeWidth={3} /> Biometric Analysis
-            </h3>
-            <div className="flex-1 bg-gray-50 p-5 rounded-xl neo-border flex flex-col justify-between gap-3">
-              <div className="flex justify-between items-center border-b-2 border-dashed border-gray-300 pb-2">
-                <span className="text-sm text-gray-600 font-bold">Detection Confidence</span>
-                <span className="text-black font-black text-base">{results?.det_score}</span>
+          {/* LEFT PANEL: VERDICT & INTELLIGENCE (Z-20) */}
+          <div className="absolute top-24 bottom-24 left-6 w-[420px] flex flex-col gap-4 pointer-events-auto z-20 overflow-y-auto custom-scrollbar pr-2 pb-4">
+            
+            {/* 1. VERDICT CARD */}
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col shadow-2xl">
+              <div className="px-5 py-3 border-b border-[#222222] flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#FFFFFF]" />
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">FINAL VERDICT</span>
               </div>
-              <div className="flex justify-between items-center border-b-2 border-dashed border-gray-300 pb-2">
-                <span className="text-sm text-gray-600 font-bold">Estimated Age</span>
-                <span className="text-black font-black text-base">{results?.age}</span>
-              </div>
-              <div className="flex justify-between items-center border-b-2 border-dashed border-gray-300 pb-2">
-                <span className="text-sm text-gray-600 font-bold">Estimated Gender</span>
-                <span className="text-black font-black text-base">{results?.gender === 'M' ? 'Male' : results?.gender === 'F' ? 'Female' : results?.gender}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600 font-bold">System Threshold</span>
-                <span className="text-black font-black text-base">&gt; {results?.threshold}</span>
-              </div>
-            </div>
-          </div>
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-6">
+                  {/* Images */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 border border-[#333333] rounded-sm overflow-hidden bg-black">
+                      <img src={previewUrl || ''} className="w-full h-full object-cover" alt="Target" />
+                    </div>
+                    <div className="w-4 h-[1px] bg-[#333333]" />
+                    <div className="w-16 h-16 border border-[#333333] rounded-sm overflow-hidden bg-black">
+                      {bestMatch?.thumbnail ? (
+                        <img src={bestMatch.thumbnail} className="w-full h-full object-cover" alt="Match" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center"><User size={20} className="text-[#333333]" /></div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Score */}
+                  <div className="text-right">
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[32px] font-bold text-[#FFFFFF] leading-none">
+                      {(results.best_score || 0).toFixed(2)}
+                    </div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[8px] tracking-[0.15em] text-[#777777] mt-1 uppercase">MATCH CONFIDENCE</div>
+                  </div>
+                </div>
 
-          <div className="bg-white neo-border neo-shadow rounded-2xl p-6 flex flex-col">
-            <h3 className="font-black text-xl mb-5 flex items-center gap-2">
-              <Layers size={24} className="text-talaash-pink" strokeWidth={3} /> Blockchain Record
-            </h3>
-            <div className="flex-1 bg-gray-50 p-5 rounded-xl neo-border flex flex-col justify-center gap-5">
-              <div>
-                <span className="text-xs font-black text-gray-500 uppercase tracking-widest block mb-2">Transaction Hash</span> 
-                <div className="font-mono text-xs text-black break-all bg-white p-2.5 border-[3px] border-black rounded-lg shadow-inner">
-                  {results?.blockchain_tx}
+                {/* Status */}
+                <div className="flex flex-col">
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[18px] font-bold text-[#FFFFFF] tracking-wide shadow-[0_0_10px_rgba(255,255,255,0.2)]">
+                    {results.passed ? "IDENTITY VERIFIED" : "NO MATCH FOUND"}
+                  </span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] text-[#777777] mt-1">
+                    Match confirmed on <span className="text-[#FF1111] font-bold">{bestMatch?.source || "N/A"}</span>
+                  </span>
                 </div>
               </div>
-              <div>
-                <span className="text-xs font-black text-gray-500 uppercase tracking-widest block mb-1">Block Number</span> 
-                <span className="font-black text-2xl text-black">{results?.block_number}</span>
+            </div>
+
+            {/* NEW: BIOMETRICS CARD */}
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col shadow-2xl flex-shrink-0">
+              <div className="px-5 py-3 border-b border-[#222222] flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#FFFFFF]" />
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">BIOMETRIC ANALYSIS</span>
+              </div>
+              <div className="p-4 flex flex-col">
+                {[
+                  ['DETECTION CONFIDENCE', results.det_score],
+                  ['ESTIMATED AGE', results.age],
+                  ['ESTIMATED GENDER', results.gender === 'M' ? 'MALE' : results.gender === 'F' ? 'FEMALE' : results.gender],
+                  ['SYSTEM THRESHOLD', '> ' + results.threshold]
+                ].map(([l, v], i) => (
+                  <div key={i} className="flex justify-between items-center py-2.5 border-b border-[#1A1A1A] last:border-0">
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.1em] text-[#777777]">{l as string}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FFFFFF]">{v as string}</span>
+                  </div>
+                ))}
               </div>
             </div>
+
+            {/* NEW: BLOCKCHAIN RECORD CARD */}
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col shadow-2xl flex-shrink-0">
+              <div className="px-5 py-3 border-b border-[#222222] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#FFFFFF]" />
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">BLOCKCHAIN RECORD</span>
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className={`text-[8px] tracking-wider px-2 py-1 rounded-sm font-bold ${results.blockchain_tx && results.blockchain_tx !== 'Hardhat offline' && results.blockchain_tx !== 'N/A' ? 'text-[#000000] bg-[#FFFFFF]' : 'text-[#FFFFFF] bg-[#FF1111]'}`}>
+                  {results.blockchain_tx && results.blockchain_tx !== 'Hardhat offline' && results.blockchain_tx !== 'N/A' ? 'VERIFIED' : 'OFFLINE'}
+                </span>
+              </div>
+              <div className="p-4 flex flex-col">
+                <div className="flex flex-col py-2.5 border-b border-[#1A1A1A]">
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#777777] mb-1.5">TRANSACTION HASH</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FFFFFF] bg-[#111111] px-2 py-1.5 border border-[#222222] truncate rounded-sm">{results.blockchain_tx}</span>
+                </div>
+                <div className="flex justify-between items-center py-2.5">
+                  <div className="flex flex-col">
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#777777] mb-1">BLOCK NUMBER</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FFFFFF]">{results.block_number}</span>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#777777] mb-1">NETWORK</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FF1111]">SEPOLIA TESTNET</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. INTELLIGENCE BRIEF CARD */}
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col shadow-2xl flex-shrink-0 min-h-[250px]">
+              <div className="px-5 py-3 border-b border-[#222222] flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#FF1111]" />
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">INTELLIGENCE BRIEF</span>
+              </div>
+              <div className="p-5 overflow-y-auto custom-scrollbar flex-1">
+                {results.llm_context && results.llm_context !== "N/A" ? (
+                  <div className="text-[11px] text-[#AAAAAA] leading-[1.8] font-['Inter'] whitespace-pre-wrap">
+                    {results.llm_context.split('\n').map((line, i) => (
+                      <p key={i} className="mb-3 last:mb-0">{line.replace(/\*\*/g, '')}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center flex-col gap-3 opacity-50">
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#555555] tracking-widest">NO ADDITIONAL INTEL</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
           </div>
 
-        </div>
-
-        {/* ── CANDIDATES ROSTER ── */}
-        <div className="bg-white neo-border neo-shadow rounded-2xl p-6 mt-1">
-          <h2 className="font-black text-2xl mb-6 flex items-center gap-2">
-            <Search size={28} strokeWidth={3} /> Match Candidates <span className="text-gray-400 text-xl">({results?.candidates.length})</span>
-          </h2>
-
-          {results?.candidates.length === 0 ? (
-            <div className="bg-gray-50 border-[3px] border-dashed border-gray-300 rounded-2xl p-10 text-center">
-              <p className="text-gray-500 font-bold text-lg">No comparable faces were found online.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {results?.candidates.map((c, i) => (
-                <div key={i} className={`bg-white neo-border rounded-xl flex flex-col overflow-hidden relative ${c.verified ? 'ring-4 ring-talaash-green shadow-[4px_4px_0px_0px_rgba(0,166,81,0.3)]' : 'hover:-translate-y-1 hover:neo-shadow transition-all'}`}>
-                  
-                  {c.verified && (
-                    <div className="absolute top-2 right-2 bg-talaash-green text-white text-[9px] font-black px-2 py-1 rounded neo-border z-10 flex items-center gap-1 shadow-sm">
-                      <CheckCircle size={10} strokeWidth={3} /> VERIFIED
+          {/* RIGHT PANEL: MATCH CANDIDATES (Z-20) */}
+          <div className="absolute top-24 bottom-24 right-6 w-[450px] flex flex-col z-20 pointer-events-auto">
+            
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col h-full shadow-2xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-[#222222] flex items-center justify-between bg-[#050505]">
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">MATCH CANDIDATES</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FF1111]">{results.candidates.length} RESULTS</span>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto custom-scrollbar">
+                {results.candidates.map((candidate, i) => (
+                  <div key={i} className="flex gap-4 p-4 border-b border-[#1A1A1A] hover:bg-[#111111] transition-colors group">
+                    {/* Thumb */}
+                    <div className="w-14 h-14 bg-[#000000] border border-[#333333] rounded-sm flex-shrink-0 overflow-hidden">
+                      {candidate.thumbnail ? (
+                        <img src={candidate.thumbnail} className="w-full h-full object-cover" alt="Thumb" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center"><User size={16} className="text-[#333333]" /></div>
+                      )}
                     </div>
-                  )}
 
-                  <div className="h-40 w-full bg-gray-100 border-b-[3px] border-black flex items-center justify-center overflow-hidden">
-                    {c.thumbnail ? (
-                      <img src={c.thumbnail} alt={c.source} className="w-full h-full object-cover" />
-                    ) : (
-                      <User size={40} className="text-gray-300" />
-                    )}
-                  </div>
+                    {/* Details */}
+                    <div className="flex-1 flex flex-col justify-between py-0.5">
+                      <div className="flex items-start justify-between">
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FFFFFF]">{candidate.source}</span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[12px] font-bold text-[#FF1111]">{(candidate.score || 0).toFixed(2)}</span>
+                      </div>
+                      
+                      <p className="text-[10px] text-[#777777] font-['Inter'] line-clamp-2 leading-relaxed">
+                        {candidate.title || "No title provided"}
+                      </p>
 
-                  <div className="p-4 flex flex-col flex-1 bg-gray-50">
-                    <div className="flex-1">
-                      <h4 className="font-black text-base truncate mb-1" title={c.source}>{c.source || 'Unknown'}</h4>
-                      <p className="text-[11px] text-gray-500 font-bold line-clamp-2 leading-snug" title={c.title || c.link}>{c.title || c.link}</p>
+                      <div className="w-full h-[2px] bg-[#1A1A1A] mt-2">
+                        <div className="h-full bg-[#FF1111]" style={{ width: `${Math.min(100, (candidate.score || 0) * 100)}%` }} />
+                      </div>
                     </div>
-                    
-                    <div className="flex items-center justify-between mt-4 pt-3 border-t-[3px] border-black">
-                      <span className={`font-black text-2xl ${c.verified ? 'text-talaash-darkgreen' : c.score > 0.3 ? 'text-talaash-yellow' : 'text-red-500'}`}>
-                        {c.score.toFixed(2)}
-                      </span>
-                      <a href={c.link} target="_blank" rel="noreferrer" className="text-black bg-white p-2 rounded-xl neo-border hover:bg-black hover:text-white transition-colors">
-                        <ExternalLink size={16} strokeWidth={2.5} />
+
+                    {/* Actions */}
+                    <div className="flex flex-col justify-center gap-2">
+                      <a href={candidate.link} target="_blank" rel="noreferrer"
+                         className="flex items-center justify-center px-3 py-1.5 bg-[#FFFFFF] text-[#000000] hover:bg-[#FF1111] hover:text-[#FFFFFF] transition-colors rounded-sm"
+                         title="Open Source Link"
+                      >
+                         <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] font-bold">MATCH</span>
                       </a>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+                
+                {results.candidates.length === 0 && (
+                  <div className="p-8 text-center flex flex-col items-center justify-center h-full opacity-50">
+                    <User size={32} className="text-[#555555] mb-3" />
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] text-[#777777]">NO CANDIDATES FOUND</p>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+          </div>
+
         </div>
 
-      </div>
-    </main>
-  );
+        {/* Global Scrollbar Styles for this component only */}
+        <style dangerouslySetInnerHTML={{__html: `
+          .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+          }
+          .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #333333;
+            border-radius: 4px;
+          }
+          .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #FF1111;
+          }
+        `}} />
+      </main>
+    );
+  }
+
 }

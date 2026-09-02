@@ -1,25 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #000000;
-  
-  --color-talaash-yellow: #FDB813;
-  --color-talaash-green: #00A651;
-  --color-talaash-darkgreen: #005C29;
-  --color-talaash-pink: #D81B60;
+  --background: #0A0B0D;
+  --foreground: #E8E6E1;
+  --panel: #141517;
+  --border: #2A2D31;
+  --accent: #C9A227;
+  --text-dim: #8A8D91;
+  --text-muted: #5A5D61;
+  --verified: #4A7A5A;
+  --failed: #8B4A4A;
+  --panel-hover: #1A1C1F;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-talaash-yellow: var(--color-talaash-yellow);
-  --color-talaash-green: var(--color-talaash-green);
-  --color-talaash-darkgreen: var(--color-talaash-darkgreen);
-  --color-talaash-pink: var(--color-talaash-pink);
-  
+  --color-panel: var(--panel);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-dim: var(--text-dim);
+  --color-muted: var(--text-muted);
+  --color-verified: var(--verified);
+  --color-failed: var(--failed);
+  --color-panel-hover: var(--panel-hover);
+
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-jetbrains);
 }
 
 body {
@@ -29,16 +36,77 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Neobrutalism Utilities */
+/* Dot grid background */
 @layer utilities {
-  .neo-border {
-    border: 3px solid #000;
+  .dot-grid-bg {
+    background-image: radial-gradient(circle, #2A2D31 1px, transparent 1px);
+    background-size: 24px 24px;
   }
-  .neo-shadow {
-    box-shadow: 4px 4px 0px 0px #000000;
+
+  .intel-panel {
+    background: #141517;
+    border: 1px solid #2A2D31;
+    border-radius: 4px;
   }
-  .neo-shadow-hover:hover {
-    box-shadow: 2px 2px 0px 0px #000000;
-    transform: translate(2px, 2px);
+
+  .intel-border {
+    border: 1px solid #2A2D31;
+  }
+
+  .label-caps {
+    font-family: var(--font-jetbrains), monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #8A8D91;
+  }
+
+  .mono {
+    font-family: var(--font-jetbrains), monospace;
+  }
+
+  .data-value {
+    font-family: var(--font-jetbrains), monospace;
+    color: #E8E6E1;
+  }
+
+  .accent-text {
+    color: #C9A227;
   }
 }
+
+/* Loading spinner */
+@keyframes intel-spin {
+  to { transform: rotate(360deg); }
+}
+.intel-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #2A2D31;
+  border-top-color: #C9A227;
+  border-radius: 50%;
+  animation: intel-spin 0.8s linear infinite;
+}
+
+/* Progress bar */
+@keyframes intel-progress {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 200% 0%; }
+}
+.intel-progress-bar {
+  background: linear-gradient(90deg, #C9A227 0%, #8A8D91 50%, #C9A227 100%);
+  background-size: 200% 100%;
+  animation: intel-progress 2s linear infinite;
+}
+
+/* Print styles */
+@media print {
+  body { background: white !important; color: black !important; }
+  .no-print { display: none !important; }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0A0B0D; }
+::-webkit-scrollbar-thumb { background: #2A2D31; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3A3D41; }

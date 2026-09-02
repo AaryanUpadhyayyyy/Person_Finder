@@ -1,26 +1,9 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Leckerli_One } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-const leckerliOne = Leckerli_One({
-  weight: "400",
-  variable: "--font-leckerli-one",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "Talaash - Identity Scanner",
-  description: "Face Identification & Blockchain Verification",
+  title: "TALAASH — Identity Intelligence",
+  description: "Face Identification & Blockchain Verification System",
 };
 
 export default function RootLayout({
@@ -30,9 +13,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} ${leckerliOne.variable} antialiased`}
-      >
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+      </head>
+      <body className="antialiased bg-black text-white" style={{ fontFamily: "'Inter', sans-serif" }}>
         {children}
       </body>
     </html>

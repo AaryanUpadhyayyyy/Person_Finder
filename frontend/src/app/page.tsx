@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { ScanFace, Crosshair, Key, ExternalLink, User, Printer, XCircle, Play, Share2, MapPin, Mic, Sliders, Eye, Globe as GlobeIcon, Layers, Compass } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 const EarthGlobe = dynamic(() => import('./components/EarthGlobe'), { ssr: false });
 
@@ -25,17 +26,21 @@ function LiveClock() {
 export default function Home() {
   const [appState, setAppState] = useState<AppState>('idle');
   const [pipelineStep, setPipelineStep] = useState(0);
+  const [logs, setLogs] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [results, setResults] = useState<ScanResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [serpApiKey, setSerpApiKey] = useState('');
+  const [groqApiKey, setGroqApiKey] = useState('');
   const [thresholdSlider, setThresholdSlider] = useState(40);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const savedKey = localStorage.getItem('serpApiKey');
     if (savedKey) setSerpApiKey(savedKey);
+    const savedGroq = localStorage.getItem('groqApiKey');
+    if (savedGroq) setGroqApiKey(savedGroq);
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -48,19 +53,16 @@ export default function Home() {
   const handleStartTalaash = async () => {
     if (!selectedFile) return;
     setAppState('processing');
-    setPipelineStep(1);
+    setLogs([]);
     const formData = new FormData();
     formData.append("file", selectedFile);
     if (serpApiKey.trim()) formData.append("serpapi_key", serpApiKey.trim());
+    if (groqApiKey.trim()) formData.append("groq_api_key", groqApiKey.trim());
     
-    const timers = [
-      setTimeout(() => setPipelineStep(2), 2000), setTimeout(() => setPipelineStep(3), 5000),
-      setTimeout(() => setPipelineStep(4), 8000), setTimeout(() => setPipelineStep(5), 20000),
-    ];
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const res = await fetch(`${apiUrl}/api/scan`, { method: "POST", body: formData });
-      timers.forEach(clearTimeout);
+      
       if (!res.ok) {
         let errDetail = "Pipeline failed or server is down";
         try {
@@ -69,16 +71,49 @@ export default function Home() {
         } catch(e) {}
         throw new Error(errDetail);
       }
-      const data: ScanResult = await res.json();
-      setResults(data);
-      setAppState('verified');
+      
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response stream");
+      
+      const decoder = new TextDecoder();
+      let buffer = "";
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === "log") {
+                setLogs(prev => [...prev, data.data]);
+              } else if (data.type === "result") {
+                setResults(data.data);
+                setAppState('verified');
+              } else if (data.type === "log_background") {
+                 // Background tasks starting after verified
+              } else if (data.type === "update_llm") {
+                setResults(prev => prev ? { ...prev, llm_context: data.data } : prev);
+              } else if (data.type === "update_blockchain") {
+                setResults(prev => prev ? { ...prev, blockchain_tx: data.data.tx_hash, block_number: data.data.block_number } : prev);
+              } else if (data.type === "error") {
+                throw new Error(data.data);
+              }
+            } catch(e) {}
+          }
+        }
+      }
     } catch (err: any) {
-      timers.forEach(clearTimeout);
       setErrorMsg(err.message);
       setAppState('error');
     }
   };
-
   const handleReset = () => {
     setAppState('idle'); setPipelineStep(0); setSelectedFile(null); setPreviewUrl(null); setResults(null); setErrorMsg(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -193,20 +228,37 @@ export default function Home() {
           <div className="anim-left absolute left-8 top-[140px] z-20 w-[260px] flex flex-col gap-4 pointer-events-auto">
             {/* Configuration Block (API Key) */}
             <div className="border border-[#222222] rounded bg-[#000000]/80 p-4 backdrop-blur-sm hover:border-[#444444] transition-colors flex flex-col gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Key size={12} className="text-[#FFFFFF]" />
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">API ACCESS KEY</span>
+                            <div className="flex flex-col gap-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Key size={12} className="text-[#FFFFFF]" />
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">SERPAPI KEY (SEARCH)</span>
+                  </div>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Enter SerpApi Key"
+                    style={{ fontFamily: "'JetBrains Mono', monospace", WebkitTextSecurity: "disc" } as React.CSSProperties}
+                    className="w-full bg-[#111111] border border-[#222222] rounded px-3 py-2 text-[10px] text-[#FFFFFF] placeholder-[#555555] outline-none focus:border-[#FF1111] transition-colors"
+                    value={serpApiKey}
+                    onChange={(e) => { setSerpApiKey(e.target.value); localStorage.setItem('serpApiKey', e.target.value); }}
+                  />
                 </div>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  placeholder="Enter SerpApi Key"
-                  style={{ fontFamily: "'JetBrains Mono', monospace", WebkitTextSecurity: "disc" } as React.CSSProperties}
-                  className="w-full bg-[#111111] border border-[#222222] rounded px-3 py-2 text-[10px] text-[#FFFFFF] placeholder-[#555555] outline-none focus:border-[#FF1111] transition-colors"
-                  value={serpApiKey}
-                  onChange={(e) => { setSerpApiKey(e.target.value); localStorage.setItem('serpApiKey', e.target.value); }}
-                />
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Key size={12} className="text-[#FFFFFF]" />
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">GROQ KEY (INTEL)</span>
+                  </div>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Enter Groq API Key"
+                    style={{ fontFamily: "'JetBrains Mono', monospace", WebkitTextSecurity: "disc" } as React.CSSProperties}
+                    className="w-full bg-[#111111] border border-[#222222] rounded px-3 py-2 text-[10px] text-[#FFFFFF] placeholder-[#555555] outline-none focus:border-[#FF1111] transition-colors"
+                    value={groqApiKey}
+                    onChange={(e) => { setGroqApiKey(e.target.value); localStorage.setItem('groqApiKey', e.target.value); }}
+                  />
+                </div>
               </div>
             </div>
 
@@ -340,28 +392,16 @@ export default function Home() {
   // ═══════════════════════════════════════════
   // ─── STATE: PROCESSING — Pipeline Steps ───
   // ═══════════════════════════════════════════
-  if (appState === 'processing') {
-    const steps = [
-      { label: `TARGET: GLOBAL`, sub: "Initializing localized search parameters..." },
-      { label: "DETECTING & ENCODING FACE", sub: "InsightFace AI analyzing landmarks..." },
-      { label: "GOOGLE LENS & DEEP SEARCH", sub: `Dual search targeting Global networks...` },
-      { label: "VERIFYING CANDIDATES", sub: "Multi-face scoring with HD fallback..." },
-      { label: "BLOCKCHAIN RECORD", sub: "Hashing & uploading proof on-chain..." },
-    ];
-    const progress = Math.min(95, pipelineStep * 20);
-
+    if (appState === 'processing') {
     return (
       <main className="h-screen w-screen bg-[#020202] flex items-center justify-center p-2 md:p-6 overflow-hidden relative"
         style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '30px 30px' }}>
         
         <div className="relative w-full h-full border border-[#222222] rounded-2xl bg-[#000000] overflow-hidden flex items-center justify-center shadow-[0_0_80px_rgba(0,0,0,0.8)]">
-          
-          {/* GLOBE BACKGROUND (Z-0) */}
           <Suspense fallback={null}>
             <EarthGlobe />
           </Suspense>
 
-          {/* BOTTOM-LEFT TELEMETRY (Z-20) */}
           <div className="absolute bottom-8 left-8 z-20 pointer-events-none flex items-center gap-4">
             <div className="w-10 h-10 rounded-full border border-[#333333] bg-[#000000]/80 flex items-center justify-center text-[#777777]">
               <Compass size={18} />
@@ -372,10 +412,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* CENTERED COLUMN (Z-20) */}
-          <div className="w-full max-w-[440px] flex flex-col gap-4 relative z-20 pointer-events-auto">
-            
-            {/* Top Bar Inside Column */}
+          <div className="w-full max-w-[500px] flex flex-col gap-4 relative z-20 pointer-events-auto">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-3">
                 <div className="w-5 h-5 rounded-full border border-[#FF1111] flex items-center justify-center">
@@ -383,21 +420,9 @@ export default function Home() {
                 </div>
                 <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[15px] font-bold tracking-[0.25em] text-[#FFFFFF]">TALAASH</span>
               </div>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] text-[#FF1111] tracking-[0.2em] font-bold animate-pulse">SCANNING...</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] text-[#FF1111] tracking-[0.2em] font-bold animate-pulse">STREAMING TELEMETRY...</span>
             </div>
 
-            {/* 1. SCAN PROGRESS PANEL */}
-            <div className="border border-[#222222] rounded-sm bg-[#0A0A0A]/95 p-5 shadow-2xl backdrop-blur-md">
-              <div className="flex items-center justify-between mb-4">
-                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">SCAN PROGRESS</span>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[12px] font-bold text-[#FF1111]">{progress}%</span>
-              </div>
-              <div className="w-full h-[3px] bg-[#1A1A1A] rounded-none overflow-hidden">
-                <div className="h-full bg-[#FF1111] rounded-none transition-all duration-1000" style={{ width: `${progress}%` }} />
-              </div>
-            </div>
-
-            {/* 2. CANDIDATE MATCH CARD */}
             <div className="border border-[#222222] rounded-sm bg-[#0A0A0A]/95 p-4 flex items-center gap-4 backdrop-blur-md">
               <div className="w-12 h-12 rounded-sm border border-[#333333] overflow-hidden flex-shrink-0 bg-[#000000] flex items-center justify-center">
                 {previewUrl ? (
@@ -408,49 +433,29 @@ export default function Home() {
               </div>
               <div className="flex-1 min-w-0">
                 <p style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FFFFFF] truncate">
-                  {selectedFile?.name || "CANDIDATE_ID_PENDING..."}
+                  {selectedFile?.name || "TARGET ACQUIRED"}
                 </p>
                 <p style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.15em] text-[#777777] mt-1.5">
-                  TARGET: GLOBAL
+                  STATUS: ANALYZING
                 </p>
               </div>
               <div className="w-4 h-4 border border-[#333333] border-t-[#FF1111] rounded-full animate-spin flex-shrink-0" />
             </div>
 
-            {/* 3. VERIFICATION PIPELINE PANEL */}
-            <div className="border border-[#222222] rounded-sm bg-[#0A0A0A]/95 overflow-hidden backdrop-blur-md shadow-2xl">
-              <div className="px-5 py-3 border-b border-[#222222]">
-                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">VERIFICATION PIPELINE</span>
+            <div className="border border-[#222222] rounded-sm bg-[#0A0A0A]/95 p-5 shadow-2xl backdrop-blur-md flex flex-col h-[300px]">
+              <div className="flex items-center justify-between mb-4 border-b border-[#222222] pb-3">
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">LIVE TERMINAL</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FF1111] animate-pulse">REC</span>
               </div>
-              <div className="flex flex-col">
-                {steps.map((step, i) => {
-                  const sn = i + 1;
-                  const active = pipelineStep === sn;
-                  const done = pipelineStep > sn;
-                  return (
-                    <div key={i} className={`flex items-center gap-4 px-5 py-3.5 border-b border-[#1A1A1A] last:border-0 ${active ? 'bg-[#111111]/90' : ''}`}>
-                      <div className="w-4 flex justify-center flex-shrink-0">
-                        {done ? (
-                          <div className="w-2 h-2 rounded-full bg-[#FFFFFF]" />
-                        ) : active ? (
-                          <div className="w-3.5 h-3.5 border border-[#444444] border-t-[#FF1111] rounded-full animate-spin" />
-                        ) : (
-                          <div className="w-2 h-2 rounded-full border border-[#444444]" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <p style={{ fontFamily: "'JetBrains Mono', monospace" }} className={`text-[10px] tracking-[0.08em] ${done ? 'text-[#AAAAAA]' : active ? 'text-[#FFFFFF] font-bold' : 'text-[#555555]'}`}>
-                          {step.label}
-                        </p>
-                        {active && <p className="text-[10px] text-[#777777] mt-1.5 font-['Inter'] tracking-wide">{step.sub}</p>}
-                      </div>
-                      {done && <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#FFFFFF] tracking-[0.15em] font-bold">DONE</span>}
-                    </div>
-                  );
-                })}
+              <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2">
+                {logs.map((log, i) => (
+                  <div key={i} className="flex gap-3">
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#555555]">{(i + 1).toString().padStart(2, '0')}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className={`text-[10px] ${i === logs.length - 1 ? 'text-[#FFFFFF]' : 'text-[#888888]'}`}>{log}</span>
+                  </div>
+                ))}
               </div>
             </div>
-
           </div>
         </div>
       </main>
@@ -552,7 +557,7 @@ export default function Home() {
           </div>
 
           {/* LEFT PANEL: VERDICT & INTELLIGENCE (Z-20) */}
-          <div className="absolute top-24 bottom-24 left-6 w-[420px] flex flex-col gap-4 pointer-events-auto z-20 overflow-y-auto custom-scrollbar pr-2 pb-4">
+          <motion.div initial={{ x: -100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 100, damping: 20 }} className="absolute top-24 bottom-24 left-2 right-2 md:left-6 md:right-auto w-auto md:w-[420px] flex flex-col gap-4 pointer-events-auto z-20 overflow-y-auto custom-scrollbar pr-2 pb-4">
             
             {/* 1. VERDICT CARD */}
             <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col shadow-2xl">
@@ -618,26 +623,31 @@ export default function Home() {
               </div>
             </div>
 
-            {/* NEW: BLOCKCHAIN RECORD CARD */}
+                        {/* NEW: BLOCKCHAIN RECORD CARD */}
             <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col shadow-2xl flex-shrink-0">
               <div className="px-5 py-3 border-b border-[#222222] flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#FFFFFF]" />
                   <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">BLOCKCHAIN RECORD</span>
                 </div>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className={`text-[8px] tracking-wider px-2 py-1 rounded-sm font-bold ${results.blockchain_tx && results.blockchain_tx !== 'Hardhat offline' && results.blockchain_tx !== 'N/A' ? 'text-[#000000] bg-[#FFFFFF]' : 'text-[#FFFFFF] bg-[#FF1111]'}`}>
-                  {results.blockchain_tx && results.blockchain_tx !== 'Hardhat offline' && results.blockchain_tx !== 'N/A' ? 'VERIFIED' : 'OFFLINE'}
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className={`text-[8px] tracking-wider px-2 py-1 rounded-sm font-bold ${results.blockchain_tx === 'PENDING...' ? 'text-[#FF1111] bg-transparent animate-pulse' : results.blockchain_tx && results.blockchain_tx !== 'Hardhat offline' && results.blockchain_tx !== 'N/A' ? 'text-[#000000] bg-[#FFFFFF]' : 'text-[#FFFFFF] bg-[#FF1111]'}`}>
+                  {results.blockchain_tx === 'PENDING...' ? 'RECORDING...' : results.blockchain_tx && results.blockchain_tx !== 'Hardhat offline' && results.blockchain_tx !== 'N/A' ? 'VERIFIED' : 'OFFLINE'}
                 </span>
               </div>
-              <div className="p-4 flex flex-col">
+              <div className="p-4 flex flex-col relative">
+                {results.blockchain_tx === 'PENDING...' && (
+                  <div className="absolute inset-0 z-10 bg-[#0A0A0A]/80 backdrop-blur-sm flex items-center justify-center">
+                    <div className="w-4 h-4 border border-[#333333] border-t-[#FFFFFF] rounded-full animate-spin flex-shrink-0" />
+                  </div>
+                )}
                 <div className="flex flex-col py-2.5 border-b border-[#1A1A1A]">
                   <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#777777] mb-1.5">TRANSACTION HASH</span>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FFFFFF] bg-[#111111] px-2 py-1.5 border border-[#222222] truncate rounded-sm">{results.blockchain_tx}</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FFFFFF] bg-[#111111] px-2 py-1.5 border border-[#222222] truncate rounded-sm">{results.blockchain_tx === 'PENDING...' ? '' : results.blockchain_tx}</span>
                 </div>
                 <div className="flex justify-between items-center py-2.5">
                   <div className="flex flex-col">
                     <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#777777] mb-1">BLOCK NUMBER</span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FFFFFF]">{results.block_number}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FFFFFF]">{results.block_number === 'PENDING...' ? '-' : results.block_number}</span>
                   </div>
                   <div className="flex flex-col items-end">
                     <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#777777] mb-1">NETWORK</span>
@@ -647,18 +657,23 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 2. INTELLIGENCE BRIEF CARD */}
+                        {/* 2. INTELLIGENCE BRIEF CARD */}
             <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col shadow-2xl flex-shrink-0 min-h-[250px]">
               <div className="px-5 py-3 border-b border-[#222222] flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-[#FF1111]" />
                 <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">INTELLIGENCE BRIEF</span>
               </div>
-              <div className="p-5 overflow-y-auto custom-scrollbar flex-1">
-                {results.llm_context && results.llm_context !== "N/A" ? (
+              <div className="p-5 overflow-y-auto custom-scrollbar flex-1 relative">
+                {results.llm_context && results.llm_context !== "N/A" && results.llm_context !== "PENDING..." ? (
                   <div className="text-[11px] text-[#AAAAAA] leading-[1.8] font-['Inter'] whitespace-pre-wrap">
                     {results.llm_context.split('\n').map((line, i) => (
                       <p key={i} className="mb-3 last:mb-0">{line.replace(/\*\*/g, '')}</p>
                     ))}
+                  </div>
+                ) : results.llm_context === "PENDING..." ? (
+                  <div className="h-full flex items-center justify-center flex-col gap-3">
+                    <div className="w-4 h-4 border border-[#333333] border-t-[#FF1111] rounded-full animate-spin flex-shrink-0" />
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FF1111] tracking-widest animate-pulse">GENERATING INTEL...</span>
                   </div>
                 ) : (
                   <div className="h-full flex items-center justify-center flex-col gap-3 opacity-50">
@@ -668,10 +683,10 @@ export default function Home() {
               </div>
             </div>
             
-          </div>
+          </motion.div>
 
           {/* RIGHT PANEL: MATCH CANDIDATES (Z-20) */}
-          <div className="absolute top-24 bottom-24 right-6 w-[450px] flex flex-col z-20 pointer-events-auto">
+          <motion.div initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 100, damping: 20 }} className="hidden md:flex absolute top-24 bottom-24 right-6 w-[450px] flex-col z-20 pointer-events-auto">
             
             <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col h-full shadow-2xl overflow-hidden">
               <div className="px-5 py-3 border-b border-[#222222] flex items-center justify-between bg-[#050505]">
@@ -727,7 +742,7 @@ export default function Home() {
                 )}
               </div>
             </div>
-          </div>
+          </motion.div>
 
         </div>
 
@@ -752,3 +767,12 @@ export default function Home() {
   }
 
 }
+
+
+
+
+
+
+
+
+

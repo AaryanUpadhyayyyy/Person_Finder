@@ -9,7 +9,7 @@ const EarthGlobe = dynamic(() => import('./components/EarthGlobe'), { ssr: false
 type AppState = 'idle' | 'processing' | 'verified' | 'error';
 
 interface Candidate { thumbnail: string; link: string; source: string; title: string; score: number; verified: boolean; }
-interface ScanResult { passed: boolean; best_score: number; best_source: string; best_link: string; llm_context?: string; threshold: number; faces_found: number; det_score: number; age: string; gender: string; candidates: Candidate[]; blockchain_tx: string; block_number: string; }
+interface ScanResult { passed: boolean; best_score: number; best_source: string; best_link: string; llm_context?: string; threshold: number; faces_found: number; det_score: number; age: string; gender: string; candidates: Candidate[]; blockchain_tx: string; block_number: string; total_searched?: number; scored_count?: number; skipped_count?: number; }
 
 function LiveClock() {
   const [time, setTime] = useState('');
@@ -202,7 +202,7 @@ export default function Home() {
                   type="text"
                   autoComplete="off"
                   placeholder="Enter SerpApi Key"
-                  style={{ fontFamily: "'JetBrains Mono', monospace", WebkitTextSecurity: "disc" }}
+                  style={{ fontFamily: "'JetBrains Mono', monospace", WebkitTextSecurity: "disc" } as React.CSSProperties}
                   className="w-full bg-[#111111] border border-[#222222] rounded px-3 py-2 text-[10px] text-[#FFFFFF] placeholder-[#555555] outline-none focus:border-[#FF1111] transition-colors"
                   value={serpApiKey}
                   onChange={(e) => { setSerpApiKey(e.target.value); localStorage.setItem('serpApiKey', e.target.value); }}

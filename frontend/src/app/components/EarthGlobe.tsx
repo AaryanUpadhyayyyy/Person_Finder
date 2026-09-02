@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Globe from 'react-globe.gl';
 
 export default function EarthGlobe() {
-  const globeEl = useRef<any>();
+  const globeEl = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 });
 
   useEffect(() => {

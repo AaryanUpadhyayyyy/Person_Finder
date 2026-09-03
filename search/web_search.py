@@ -248,19 +248,29 @@ def search_google_reverse_image(image_url: str) -> List[Dict[str, str]]:
 
 
 def search_all_engines(image_url: str) -> List[Dict[str, str]]:
-    """Fire Google Lens, Yandex, and Google Reverse Image in PARALLEL.
+    """Fire Yandex, Google Reverse Image, and Bing Visual Search in PARALLEL.
     
-    Merges and deduplicates all results by URL.
+    Quad-engine deep search. Merges and deduplicates all results by URL.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     
     all_results: List[Dict[str, str]] = []
+    
+    # Import Bing scraper (best-effort, no crash if unavailable)
+    try:
+        from utils.bing_search import search_bing_visual
+        bing_available = True
+    except ImportError:
+        bing_available = False
+        print("  [SEARCH] Bing module not available, skipping.")
     
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {
             executor.submit(search_yandex_online, image_url): "yandex",
             executor.submit(search_google_reverse_image, image_url): "google_reverse",
         }
+        if bing_available:
+            futures[executor.submit(search_bing_visual, image_url)] = "bing_visual"
         
         for future in as_completed(futures):
             engine = futures[future]

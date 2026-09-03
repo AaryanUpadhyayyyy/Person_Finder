@@ -10,7 +10,9 @@ const EarthGlobe = dynamic(() => import('./components/EarthGlobe'), { ssr: false
 type AppState = 'idle' | 'processing' | 'verified' | 'error';
 
 interface Candidate { thumbnail: string; link: string; source: string; title: string; score: number; verified: boolean; }
-interface ScanResult { passed: boolean; best_score: number; best_source: string; best_link: string; llm_context?: string; threshold: number; faces_found: number; det_score: number; age: string; gender: string; candidates: Candidate[]; blockchain_tx: string; block_number: string; total_searched?: number; scored_count?: number; skipped_count?: number; }
+interface SocialProfile { platform: string; url: string; title: string; snippet: string; }
+interface OsintResult { extracted: { name: string; location: string; org: string }; profiles: SocialProfile[]; }
+interface ScanResult { passed: boolean; best_score: number; best_source: string; best_link: string; llm_context?: string; threshold: number; faces_found: number; det_score: number; age: string; gender: string; candidates: Candidate[]; blockchain_tx: string; block_number: string; total_searched?: number; scored_count?: number; skipped_count?: number; osint_profiles?: OsintResult | null; }
 
 function LiveClock() {
   const [time, setTime] = useState('');
@@ -102,6 +104,8 @@ export default function Home() {
                 setResults(prev => prev ? { ...prev, llm_context: data.data } : prev);
               } else if (data.type === "update_blockchain") {
                 setResults(prev => prev ? { ...prev, blockchain_tx: data.data.tx_hash, block_number: data.data.block_number } : prev);
+              } else if (data.type === "update_osint") {
+                setResults(prev => prev ? { ...prev, osint_profiles: data.data } : prev);
               } else if (data.type === "error") {
                 throw new Error(data.data);
               }
@@ -683,6 +687,53 @@ export default function Home() {
               </div>
             </div>
             
+            {/* 3. SOCIAL PROFILES CARD (OSINT) */}
+            <div className="bg-[#0A0A0A]/90 backdrop-blur-md border border-[#222222] rounded-sm flex flex-col shadow-2xl flex-shrink-0">
+              <div className="px-5 py-3 border-b border-[#222222] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#FF1111]" />
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] tracking-[0.15em] text-[#FFFFFF]">SOCIAL PROFILES</span>
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FF1111]">
+                  {results.osint_profiles?.profiles ? `${results.osint_profiles.profiles.length} FOUND` : '...'}
+                </span>
+              </div>
+              <div className="p-4 flex flex-col">
+                {!results.osint_profiles ? (
+                  <div className="flex items-center justify-center py-6 gap-3">
+                    <div className="w-4 h-4 border border-[#333333] border-t-[#FF1111] rounded-full animate-spin flex-shrink-0" />
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FF1111] tracking-widest animate-pulse">SCANNING PROFILES...</span>
+                  </div>
+                ) : results.osint_profiles.profiles.length === 0 ? (
+                  <div className="flex items-center justify-center py-6 opacity-50">
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#555555] tracking-widest">NO PROFILES DISCOVERED</span>
+                  </div>
+                ) : (
+                  <>
+                    {results.osint_profiles.extracted?.name && (
+                      <div className="mb-3 pb-3 border-b border-[#1A1A1A]">
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777] tracking-[0.1em]">TARGET: </span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FFFFFF] font-bold">{results.osint_profiles.extracted.name.toUpperCase()}</span>
+                        {results.osint_profiles.extracted.location && (
+                          <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] text-[#777777]"> | {results.osint_profiles.extracted.location}</span>
+                        )}
+                      </div>
+                    )}
+                    {results.osint_profiles.profiles.map((p, i) => (
+                      <a key={i} href={p.url} target="_blank" rel="noreferrer"
+                         className="flex items-start gap-3 py-2.5 border-b border-[#1A1A1A] last:border-0 hover:bg-[#111111] transition-colors px-2 -mx-2 rounded-sm group">
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#FF1111] font-bold min-w-[90px] flex-shrink-0 pt-0.5">{p.platform.toUpperCase()}</span>
+                        <div className="flex flex-col min-w-0">
+                          <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[10px] text-[#FFFFFF] truncate group-hover:text-[#FF1111] transition-colors">{p.title || p.url}</span>
+                          {p.snippet && <span className="text-[9px] text-[#555555] font-['Inter'] line-clamp-1 mt-0.5">{p.snippet}</span>}
+                        </div>
+                      </a>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+            
           </motion.div>
 
           {/* RIGHT PANEL: MATCH CANDIDATES (Z-20) */}
@@ -767,6 +818,7 @@ export default function Home() {
   }
 
 }
+
 
 
 

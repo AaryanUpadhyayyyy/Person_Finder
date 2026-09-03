@@ -40,19 +40,39 @@ def analyze_context(url: str, groq_api_key: str, score: float, fallback_title: s
         client = Groq(api_key=groq_api_key)
         
         prompt = f"""
-I found an image on this webpage. Based on the following text extracted from the page (and its search title), please answer these questions concisely like a military intelligence brief (use bullet points):
-1. Who is the person in this image? (If mentioned)
-2. What is the context of the image? (Why was it posted? Is it a social media post, article, etc.?)
-3. When was this published or taken? (If mentioned)
+I found an image on this webpage. Based on the following text extracted from the page (and search result titles associated with the image), generate an EXHAUSTIVE, DEEPLY ANALYTICAL INTELLIGENCE DOSSIER about the person in the image.
 
-Extract any useful intelligence. If the text is empty or irrelevant, just state that no intelligence could be gathered.
+CRITICAL RULES:
+1. STRICT ANTI-HALLUCINATION: You MUST ONLY use the information explicitly stated in the 'Extracted Text' below. DO NOT use your internal training data to guess who this person is.
+2. If the name is common (e.g., "Abhishek Kumar"), do NOT confuse them with an actor or celebrity unless the text explicitly says they are an actor. Read the surrounding context first (are they a politician, a minister, a doctor?) and build the profile based ONLY on that context.
+3. If multiple people are mentioned, focus on the primary subject of the article.
+
+Your response MUST be formatted as a detailed, multi-section report using the following structure. Write long, comprehensive paragraphs for each section based ONLY on the provided text:
+
+1. EXECUTIVE SUMMARY
+(Provide a deep overview of who this person is, their primary role, and why they are in the news based strictly on the text.)
+
+2. PRIMARY IDENTITY & AFFILIATIONS
+(Extract their full name, any titles [Dr., Minister, etc.], exact profession, and organizations/parties they are tied to based on the text.)
+
+3. CONTEXTUAL & NARRATIVE ANALYSIS
+(Deeply analyze WHY this image/article exists based on the text. What is the story? Is it a controversy, a political event, a social media post? Explain the situation in extreme detail.)
+
+4. ASSOCIATED ENTITIES & RELATIONSHIPS
+(List and explain every other person, location, or organization mentioned in the text in relation to this individual.)
+
+5. TIMELINE & DISCOVERY METADATA
+(When was this published? What dates are mentioned in the text? Give a chronological breakdown if applicable.)
+
+If the text is genuinely completely empty or irrelevant, explicitly state: "Insufficient data to build a complete profile."
+
 
 Extracted Text:
 {text_preview}
 """
         
         # Try models in order (fallback chain for decommissioned models)
-        models = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+        models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
         last_error = None
         for model_name in models:
             try:
@@ -60,7 +80,7 @@ Extracted Text:
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are TALAASH INTEL, an AI analyst providing concise, highly accurate intelligence briefs based on web text. Keep it strictly to the facts found in the text."
+                            "content": "You are TALAASH INTEL, an elite cyber-intelligence and OSINT profiler. Your job is to deeply analyze web text and construct exhaustive, highly detailed dossiers. You think deeply, analyze context, and write extensively without leaving out a single detail."
                         },
                         {
                             "role": "user",
@@ -68,8 +88,8 @@ Extracted Text:
                         }
                     ],
                     model=model_name,
-                    temperature=0.2,
-                    max_tokens=300
+                    temperature=0.4,
+                    max_tokens=2500
                 )
                 return chat_completion.choices[0].message.content
             except Exception as model_err:

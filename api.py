@@ -147,7 +147,17 @@ async def scan_face(file: UploadFile = File(...), serpapi_key: str = Form(None),
                     final_groq = groq_api_key or os.getenv("GROQ_API_KEY", "")
                     best_link = best_match.get("link")
                     best_score = float(best_match.get("similarity", 0.0))
-                    fallback_title = best_match.get("title", "")
+                    
+                    # Aggregate top 5 titles for better context (in case the best match title is generic)
+                    top_titles = []
+                    for m in all_scored:
+                        if m.get("similarity", 0) > 0.60 and m.get("title"):
+                            top_titles.append(m.get("title").strip())
+                    
+                    # Remove duplicates but preserve order
+                    unique_titles = list(dict.fromkeys(top_titles))[:5]
+                    fallback_title = " | ".join(unique_titles) if unique_titles else best_match.get("title", "")
+                    
                     llm_response = await run_in_threadpool(analyze_context, best_link, final_groq, best_score, fallback_title)
                     if llm_response:
                         llm_context_result = llm_response

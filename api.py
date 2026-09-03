@@ -158,22 +158,61 @@ async def scan_face(file: UploadFile = File(...), serpapi_key: str = Form(None),
             
             # ── OSINT Social Profiling (Background Task B) ──────────
             yield format_sse("log_background", f"[{tstamp()}] Running OSINT Social Profiling & Indian Dorking...")
-            osint_result = None
-            if llm_context_result and llm_context_result not in ("N/A", "PENDING..."):
+            osint_result = {"extracted": {}, "profiles": []}
+            
+            # Include only AI-VERIFIED social media matches (scored by InsightFace)
+            from urllib.parse import urlparse
+            social_domain_map = {
+                "instagram.com": "Instagram", "x.com": "X (Twitter)", "twitter.com": "X (Twitter)",
+                "facebook.com": "Facebook", "linkedin.com": "LinkedIn", "pinterest.com": "Pinterest",
+                "youtube.com": "YouTube", "tiktok.com": "TikTok",
+            }
+            seen_urls = set()
+            
+            # Use scored candidates (already verified by InsightFace) — highest score first
+            for candidate in all_scored:
+                link = candidate.get("link", "")
+                score = float(candidate.get("similarity", 0))
+                if not link or link in seen_urls or score < 0.60:
+                    continue
+                try:
+                    domain = urlparse(link).netloc.lower().replace("www.", "")
+                except:
+                    domain = ""
+                # Only include social media domains
+                platform = None
+                for d, p in social_domain_map.items():
+                    if d in domain:
+                        platform = p
+                        break
+                if platform:
+                    seen_urls.add(link)
+                    osint_result["profiles"].append({
+                        "platform": platform,
+                        "url": link,
+                        "title": candidate.get("title", "")[:200],
+                        "snippet": f"Match Score: {round(score, 2)}",
+                    })
+            
+            # Run OSINT dorking if LLM extracted useful text
+            if llm_context_result and llm_context_result not in ("N/A", "PENDING...") and not llm_context_result.startswith("INTELLIGENCE FAILURE"):
                 try:
                     from utils.osint_profiler import run_osint_profiling
                     final_groq = groq_api_key or os.getenv("GROQ_API_KEY", "")
-                    osint_result = await run_in_threadpool(
+                    dork_result = await run_in_threadpool(
                         run_osint_profiling,
                         llm_context_result,
                         final_groq,
                         serpapi_key,
                     )
+                    if dork_result.get("extracted"):
+                        osint_result["extracted"] = dork_result["extracted"]
+                    for p in dork_result.get("profiles", []):
+                        if p.get("url") not in seen_urls:
+                            seen_urls.add(p["url"])
+                            osint_result["profiles"].append(p)
                 except Exception as e:
                     print(f"OSINT profiling failed: {e}")
-                    osint_result = {"extracted": {}, "profiles": []}
-            else:
-                osint_result = {"extracted": {}, "profiles": []}
             
             yield format_sse("update_osint", osint_result)
             

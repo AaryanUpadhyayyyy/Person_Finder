@@ -56,7 +56,7 @@ Rules:
                 {"role": "system", "content": "You extract structured entities from text. Return only valid JSON."},
                 {"role": "user", "content": prompt}
             ],
-            model="llama3-8b-8192",
+            model="openai/gpt-oss-20b",
             temperature=0.0,
             max_tokens=200,
         )

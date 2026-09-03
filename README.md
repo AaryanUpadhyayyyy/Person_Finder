@@ -57,7 +57,7 @@ TALAASH (meaning "Search" in Hindi/Urdu) is a full-stack OSINT (Open Source Inte
                      │                   │ │                   │
         ┌────────────▼──────┐  ┌────────▼─▼────────┐  ┌──────▼──────────────┐
         │   LLM INTEL BRIEF │  │  OSINT SOCIAL      │  │ BLOCKCHAIN PROOF    │
-        │  Jina Reader+Groq │  │  PROFILER           │  │ Sepolia/Hardhat     │
+        │  Jina Reader+Groq │  │  PROFILER           │  │ Hardhat Local Chain │
         │  Context analysis │  │  8 Google Dorks     │  │ SHA-256 notarize    │
         └───────────────────┘  │  India Dorking      │  └─────────────────────┘
                                └────────────────────┘
@@ -83,7 +83,8 @@ TALAASH (meaning "Search" in Hindi/Urdu) is a full-stack OSINT (Open Source Inte
 
 ### LLM Intelligence Brief
 - Uses **Jina Reader API** to extract clean text from JS-heavy pages (Facebook, X, Instagram)
-- **Groq LLaMA 3** analyzes the text and generates a military-style intelligence brief
+- **Groq** LLM analyzes the text and generates a military-style intelligence brief
+- Model fallback chain: `openai/gpt-oss-20b` → `qwen/qwen3.8-27b` → `openai/gpt-oss-120b`
 - Answers: *Who is this person? What's the context? When was this published?*
 
 ### OSINT Social Profiler
@@ -100,10 +101,15 @@ After LLM extracts a person's name, the system automatically runs **Google Dorks
 | **BharatMatrimony** 🇮🇳 | `site:bharatmatrimony.com "{name}"` |
 | **Naukri.com** 🇮🇳 | `site:naukri.com "{name}" {org}` |
 
-### Blockchain Proof
-- SHA-256 hash of all discovery data stored on **Ethereum (Sepolia Testnet)**
+Only AI-verified social media matches (score > 0.60) are shown in the Social Profiles card.
+
+### Blockchain Proof (Hardhat Local Chain)
+- **Hardhat** local Ethereum node runs inside the Docker container (10 accounts × 10,000 ETH)
+- Smart contract (`ProofOfExistence.sol`) auto-compiled via `py_solc_x` and auto-deployed on container start
+- SHA-256 hash of all discovery data stored on-chain via `notarizeHash(id, hash)`
 - Tamper-evident — if anyone modifies the data, the hash won't match
 - On-chain re-verification via `doesProofExist(id, hash)`
+- **Zero cost, instant finality, no testnet faucets needed**
 
 ### Real-Time Dashboard (TALAASH UI)
 - **Live Terminal** — SSE (Server-Sent Events) stream shows real-time pipeline logs
@@ -120,9 +126,9 @@ After LLM extracts a person's name, the system automatically runs **Google Dorks
 |-------|-----------|
 | **Frontend** | Next.js 16, React, TypeScript, Tailwind CSS, Framer Motion, Three.js |
 | **Backend** | FastAPI, Python 3.10, Server-Sent Events (SSE) |
-| **AI/ML** | InsightFace (SCRFD + ArcFace), Groq LLaMA 3 8B |
+| **AI/ML** | InsightFace (SCRFD + ArcFace), Groq LLM (GPT-OSS / Qwen) |
 | **Search** | SerpApi (Google Lens, Yandex, Google Reverse), Bing Visual Search (free scraper) |
-| **Blockchain** | Solidity, web3.py, Hardhat, Sepolia Testnet |
+| **Blockchain** | Solidity 0.8.1, web3.py, Hardhat (local chain inside Docker) |
 | **Deployment** | Vercel (frontend), AWS EC2 + Docker (backend) |
 
 ---
@@ -131,61 +137,74 @@ After LLM extracts a person's name, the system automatically runs **Google Dorks
 
 ### Prerequisites
 - Python 3.9+
-- Node.js 16+
+- Node.js 16+ (included in Docker)
 - Git
+- Docker (recommended)
 
-### 1. Install Dependencies
+### Option A: Docker (Recommended)
 
 ```bash
 cd face_id_blockchain
-pip install -r requirements.txt
-cd frontend && npm install && cd ..
+
+# Build the Docker image (includes Hardhat + Node.js + Python)
+docker build -t talaash .
+
+# Create .env file
+cp .env.example .env
+# Edit .env with your SERPAPI_API_KEY and GROQ_API_KEY
+
+# Run (Hardhat auto-starts, contract auto-deploys)
+docker run -d -p 7860:7860 --env-file .env --name talaash talaash
 ```
 
-### 2. Set Up Environment
+The container automatically:
+1. Starts a Hardhat local blockchain (localhost:8545)
+2. Compiles `ProofOfExistence.sol`
+3. Deploys the contract
+4. Starts the TALAASH API on port 7860
+
+### Option B: Manual Setup
 
 ```bash
-cp .env.example .env
+cd face_id_blockchain
+
+# Python dependencies
+pip install -r requirements.txt
+
+# Node dependencies (for Hardhat)
+npm install
+
+# Start Hardhat node (separate terminal)
+npx hardhat node
+
+# Compile and deploy contract
+python -m blockchain.compile_contract
+python -m blockchain.deploy_contract
+
+# Start API
+uvicorn api:app --host 0.0.0.0 --port 7860 --reload
 ```
 
-Edit `.env` and fill in:
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000)
+
+### Environment Variables
 
 | Variable | Where to get it | Required? |
 |----------|----------------|-----------|
 | `SERPAPI_API_KEY` | [serpapi.com](https://serpapi.com/manage-api-key) | ✅ Yes |
-| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com/keys) | ✅ Yes (for LLM + OSINT) |
-| `IMGBB_API_KEY` | [api.imgbb.com](https://api.imgbb.com/) | Optional (uguu.se fallback) |
-| `ETH_RPC_URL` | `http://127.0.0.1:8545` for local Hardhat | Optional |
-| `ETH_PRIVATE_KEY` | Hardhat default key is pre-filled | Optional |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com/keys) | ✅ Yes |
+| `ETH_RPC_URL` | Auto-set to `http://127.0.0.1:8545` (Hardhat) | Auto |
+| `ETH_PRIVATE_KEY` | Hardhat Account #0 (pre-filled) | Auto |
+| `CONTRACT_ADDRESS` | Auto-deployed on container start | Auto |
 | `SIMILARITY_THRESHOLD` | Face match threshold (default: `0.4`) | Optional |
-
-### 3. Run Backend
-
-```bash
-uvicorn api:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 4. Run Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) and start scanning!
-
-### 5. (Optional) Blockchain Setup
-
-```bash
-# Compile smart contract
-python -m blockchain.compile_contract
-
-# Start local Hardhat node (separate terminal)
-npx hardhat node
-
-# Deploy contract
-python -m blockchain.deploy_contract
-```
 
 ---
 
@@ -201,9 +220,9 @@ face_id_blockchain/
 ├── blockchain/
 │   ├── contracts/
 │   │   └── ProofOfExistence.sol  # Solidity smart contract
-│   ├── compile_contract.py       # Compiler
-│   ├── deploy_contract.py        # Deployer
-│   ├── blockchain_upload.py      # Hash upload
+│   ├── compile_contract.py       # py_solc_x compiler
+│   ├── deploy_contract.py        # Contract deployer
+│   ├── blockchain_upload.py      # Hash upload to chain
 │   └── blockchain_verify.py      # Hash re-verification
 ├── utils/
 │   ├── config.py                 # Environment config loader
@@ -218,8 +237,11 @@ face_id_blockchain/
 │           └── EarthGlobe.tsx    # 3D Globe component
 ├── api.py                        # FastAPI backend (SSE streaming)
 ├── main.py                       # CLI pipeline entry point
-├── requirements.txt
-├── .env.example
+├── Dockerfile                    # Multi-layer: Python + Node.js + Hardhat
+├── entrypoint.sh                 # Starts Hardhat → deploys contract → starts API
+├── hardhat.config.js             # Hardhat configuration
+├── package.json                  # Node.js dependencies (Hardhat)
+├── requirements.txt              # Python dependencies
 └── README.md
 ```
 
@@ -244,20 +266,32 @@ Upload a face image and receive a real-time SSE stream of pipeline events.
 | `log` | `string` | Real-time pipeline status |
 | `result` | `ScanResult` | Verified candidates + biometrics |
 | `update_llm` | `string` | Intelligence Brief text |
-| `update_osint` | `OsintResult` | Social media profiles |
+| `update_osint` | `OsintResult` | Social media profiles (score > 0.60) |
 | `update_blockchain` | `{tx_hash, block_number}` | Blockchain proof |
 | `done` | `true` | Stream complete |
 | `error` | `string` | Error message |
 
 ---
 
+## How Blockchain Verification Works
+
+1. Discovery data (URL + title + source + similarity + timestamp) is concatenated into a canonical string
+2. SHA-256 hash is computed (32 bytes = Solidity `bytes32`)
+3. Hash is stored on-chain via `notarizeHash(id, hash)` on the local Hardhat chain
+4. Re-verification recomputes the hash and calls `doesProofExist(id, hash)`
+5. If anyone tampers with the data, the recomputed hash won't match → `FALSE`
+
+The Hardhat chain runs inside the Docker container with instant block mining, zero gas cost, and 10,000 ETH per account. No testnet faucets required.
+
+---
+
 ## Known Limitations
 
-- **Search coverage** depends on what Google/Yandex/Bing have indexed. Private accounts and un-indexed content won't appear.
+- **Search coverage** depends on what Google/Yandex/Bing have indexed. Small accounts (<1K followers) are often invisible to search engines.
 - **SerpApi credits** — each scan uses ~2 Google Lens + ~2 deep search + ~8 OSINT dork credits ≈ **12 credits per scan**.
-- **Bing scraper** is best-effort — Bing may block requests with CAPTCHAs. It silently fails and the pipeline continues.
+- **Bing scraper** is best-effort — Bing may block with CAPTCHAs. Fails silently.
 - **Face accuracy** depends on image quality, lighting, and angle.
-- **Testnet-only** blockchain — mainnet deployment requires real ETH and security audits.
+- **Hardhat chain resets on container restart** — blockchain data is ephemeral. For persistent storage, mount a Docker volume.
 - **Ethical use only** — face identification technology requires explicit consent. This project is for educational and hackathon purposes.
 
 ---
@@ -267,7 +301,13 @@ Upload a face image and receive a real-time SSE stream of pipeline events.
 | Component | Platform | Method |
 |-----------|----------|--------|
 | Frontend | Vercel | Auto-deploy on `git push` to `main` |
-| Backend | AWS EC2 | Docker container on port 10000 |
+| Backend | AWS EC2 | Docker container (Hardhat + API on port 10000) |
+
+```bash
+# AWS deployment
+docker build -t backend .
+docker run -d -p 10000:7860 --env-file .env --name talaash backend
+```
 
 ---
 

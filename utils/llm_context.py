@@ -51,24 +51,33 @@ Extracted Text:
 {text_preview}
 """
         
-        # Using a reliable fast Groq model
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are TALAASH INTEL, an AI analyst providing concise, highly accurate intelligence briefs based on web text. Keep it strictly to the facts found in the text."
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            model="llama3-8b-8192",
-            temperature=0.2,
-            max_tokens=300
-        )
+        # Try models in order (fallback chain for decommissioned models)
+        models = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+        last_error = None
+        for model_name in models:
+            try:
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are TALAASH INTEL, an AI analyst providing concise, highly accurate intelligence briefs based on web text. Keep it strictly to the facts found in the text."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        }
+                    ],
+                    model=model_name,
+                    temperature=0.2,
+                    max_tokens=300
+                )
+                return chat_completion.choices[0].message.content
+            except Exception as model_err:
+                print(f"Model {model_name} failed: {model_err}")
+                last_error = model_err
+                continue
         
-        return chat_completion.choices[0].message.content
+        return f"INTELLIGENCE FAILURE: All models failed. Last error: {str(last_error)}"
         
     except Exception as e:
         print(f"LLM Context analysis failed: {e}", file=sys.stderr)

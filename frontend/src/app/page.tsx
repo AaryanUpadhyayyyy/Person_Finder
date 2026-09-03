@@ -655,7 +655,7 @@ export default function Home() {
                   </div>
                   <div className="flex flex-col items-end">
                     <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[9px] tracking-[0.1em] text-[#777777] mb-1">NETWORK</span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FF1111]">SEPOLIA TESTNET</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }} className="text-[11px] font-bold text-[#FF1111]">HARDHAT LOCAL</span>
                   </div>
                 </div>
               </div>
